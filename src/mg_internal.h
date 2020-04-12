@@ -34,7 +34,9 @@
 #include "mg_http.h"
 #include "mg_net.h"
 
+#ifndef MG_CTL_MSG_MESSAGE_SIZE
 #define MG_CTL_MSG_MESSAGE_SIZE 8192
+#endif
 
 /* internals that need to be accessible in unit tests */
 MG_INTERNAL struct mg_connection *mg_do_connect(struct mg_connection *nc,
@@ -81,6 +83,9 @@ extern void *(*test_calloc)(size_t count, size_t size);
 
 #if MG_ENABLE_HTTP
 struct mg_serve_http_opts;
+
+MG_INTERNAL struct mg_http_proto_data *mg_http_create_proto_data(
+    struct mg_connection *c);
 
 /*
  * Reassemble the content of the buffer (buf, blen) which should be

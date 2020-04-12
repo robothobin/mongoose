@@ -128,8 +128,16 @@ MG_INTERNAL size_t recv_avail_size(struct mg_connection *conn, size_t max) {
 static int mg_do_recv(struct mg_connection *nc);
 
 int mg_if_poll(struct mg_connection *nc, double now) {
-  if ((nc->flags & MG_F_CLOSE_IMMEDIATELY) ||
-      (nc->send_mbuf.len == 0 && (nc->flags & MG_F_SEND_AND_CLOSE))) {
+  if (nc->flags & MG_F_CLOSE_IMMEDIATELY) {
+    mg_close_conn(nc);
+    return 0;
+  } else if (nc->flags & MG_F_SEND_AND_CLOSE) {
+    if (nc->send_mbuf.len == 0) {
+      nc->flags |= MG_F_CLOSE_IMMEDIATELY;
+      mg_close_conn(nc);
+      return 0;
+    }
+  } else if (nc->flags & MG_F_RECV_AND_CLOSE) {
     mg_close_conn(nc);
     return 0;
   }
@@ -172,6 +180,13 @@ void mg_destroy_conn(struct mg_connection *conn, int destroy_if) {
 }
 
 void mg_close_conn(struct mg_connection *conn) {
+  /* See if there's any remaining data to deliver. Skip if user completely
+   * throttled the connection there will be no progress anyway. */
+  if (conn->sock != INVALID_SOCKET && mg_do_recv(conn) == -2) {
+    /* Receive is throttled, wait. */
+    conn->flags |= MG_F_RECV_AND_CLOSE;
+    return;
+  }
 #if MG_ENABLE_SSL
   if (conn->flags & MG_F_SSL_HANDSHAKE_DONE) {
     mg_ssl_if_conn_close_notify(conn);
@@ -262,6 +277,7 @@ void mg_mgr_free(struct mg_mgr *m) {
 
   for (conn = m->active_connections; conn != NULL; conn = tmp_conn) {
     tmp_conn = conn->next;
+    conn->flags |= MG_F_CLOSE_IMMEDIATELY;
     mg_close_conn(conn);
   }
 
@@ -325,8 +341,8 @@ static int mg_resolve2(const char *host, struct in_addr *ina) {
     return 0;
   }
   for (p = servinfo; p != NULL; p = p->ai_next) {
-    memcpy(&h, &p->ai_addr, sizeof(struct sockaddr_in *));
-    memcpy(ina, &h->sin_addr, sizeof(ina));
+    memcpy(&h, &p->ai_addr, sizeof(h));
+    memcpy(ina, &h->sin_addr, sizeof(*ina));
   }
   freeaddrinfo(servinfo);
   return 1;
@@ -524,7 +540,7 @@ struct mg_connection *mg_if_accept_new_conn(struct mg_connection *lc) {
   nc->iface = lc->iface;
   if (lc->flags & MG_F_SSL) nc->flags |= MG_F_SSL;
   mg_add_conn(nc->mgr, nc);
-  LOG(LL_DEBUG, ("%p %p %d %d", lc, nc, nc->sock, (int) nc->flags));
+  LOG(LL_DEBUG, ("%p %p %d %#x", lc, nc, (int) nc->sock, (int) nc->flags));
   return nc;
 }
 
@@ -565,18 +581,23 @@ static int mg_do_recv(struct mg_connection *nc) {
       ((nc->flags & MG_F_LISTENING) && !(nc->flags & MG_F_UDP))) {
     return -1;
   }
-  len = recv_avail_size(nc, len);
-  if (len == 0) return -2;
-  if (nc->recv_mbuf.size < nc->recv_mbuf.len + len) {
-    mbuf_resize(&nc->recv_mbuf, nc->recv_mbuf.len + len);
-  }
-  buf = nc->recv_mbuf.buf + nc->recv_mbuf.len;
-  len = nc->recv_mbuf.size - nc->recv_mbuf.len;
-  if (nc->flags & MG_F_UDP) {
-    res = mg_recv_udp(nc, buf, len);
-  } else {
-    res = mg_recv_tcp(nc, buf, len);
-  }
+  do {
+    len = recv_avail_size(nc, len);
+    if (len == 0) {
+      res = -2;
+      break;
+    }
+    if (nc->recv_mbuf.size < nc->recv_mbuf.len + len) {
+      mbuf_resize(&nc->recv_mbuf, nc->recv_mbuf.len + len);
+    }
+    buf = nc->recv_mbuf.buf + nc->recv_mbuf.len;
+    len = nc->recv_mbuf.size - nc->recv_mbuf.len;
+    if (nc->flags & MG_F_UDP) {
+      res = mg_recv_udp(nc, buf, len);
+    } else {
+      res = mg_recv_tcp(nc, buf, len);
+    }
+  } while (res > 0 && !(nc->flags & (MG_F_CLOSE_IMMEDIATELY | MG_F_UDP)));
   return res;
 }
 
@@ -693,7 +714,9 @@ static int mg_recv_udp(struct mg_connection *nc, char *buf, size_t len) {
       mg_hexdump_connection(nc, nc->mgr->hexdump_file, buf, n, MG_EV_RECV);
     }
 #endif
-    mg_call(nc, NULL, nc->user_data, MG_EV_RECV, &n);
+    if (n != 0) {
+      mg_call(nc, NULL, nc->user_data, MG_EV_RECV, &n);
+    }
   }
 
 out:
@@ -854,6 +877,16 @@ struct mg_connection *mg_connect(struct mg_mgr *mgr, const char *address,
   return mg_connect_opt(mgr, address, MG_CB(callback, user_data), opts);
 }
 
+void mg_ev_handler_empty(struct mg_connection *c, int ev,
+                         void *ev_data MG_UD_ARG(void *user_data)) {
+  (void) c;
+  (void) ev;
+  (void) ev_data;
+#if MG_ENABLE_CALLBACK_USERDATA
+  (void) user_data;
+#endif
+}
+
 struct mg_connection *mg_connect_opt(struct mg_mgr *mgr, const char *address,
                                      MG_CB(mg_event_handler_t callback,
                                            void *user_data),
@@ -864,6 +897,8 @@ struct mg_connection *mg_connect_opt(struct mg_mgr *mgr, const char *address,
   char host[MG_MAX_HOST_LEN];
 
   MG_COPY_COMMON_CONNECTION_OPTIONS(&add_sock_opts, &opts);
+
+  if (callback == NULL) callback = mg_ev_handler_empty;
 
   if ((nc = mg_create_connection(mgr, callback, add_sock_opts)) == NULL) {
     return NULL;
@@ -978,10 +1013,7 @@ struct mg_connection *mg_bind_opt(struct mg_mgr *mgr, const char *address,
   opts.user_data = user_data;
 #endif
 
-  if (callback == NULL) {
-    MG_SET_PTRPTR(opts.error_string, "handler is required");
-    return NULL;
-  }
+  if (callback == NULL) callback = mg_ev_handler_empty;
 
   MG_COPY_COMMON_CONNECTION_OPTIONS(&add_sock_opts, &opts);
 

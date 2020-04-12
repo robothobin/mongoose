@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2018 Cesanta Software Limited
+ * Copyright (c) 2014-2019 Cesanta Software Limited
  * All rights reserved
  *
  * Licensed under the Apache License, Version 2.0 (the ""License"");
@@ -26,11 +26,7 @@
 .global mgos_nsleep100_impl
 .global mgos_nsleep100_loop_count
 
-#if defined(TARGET_IS_CC3200) || defined(TARGET_IS_CC3220)
-.section .iram.mgos_nsleep100_impl
-#else
 .section .text.IRAM.mgos_nsleep100_impl
-#endif
 .type mgos_nsleep100_impl, %function
 .align 4
 
@@ -38,17 +34,13 @@ mgos_nsleep100_impl:
       ldr     r3, =mgos_nsleep100_loop_count
       ldr     r3, [r3]
       mul     r0, r3
-#if defined(STM32L4)
-      mov     r1, #3
-#else
       mov     r1, #6
-#endif
       udiv    r0, r0, r1
-      cbz     r0, mgos_nsleep100_impl_out
-mgos_nsleep100_impl_loop:
+      cbz     r0, xxx
+lxx:
       subs    r0, #1
-      bne     mgos_nsleep100_impl_loop
-mgos_nsleep100_impl_out:
+      bne     lxx
+xxx:
       bx      lr
 .align 4
 .size mgos_nsleep100_impl, . - mgos_nsleep100_impl

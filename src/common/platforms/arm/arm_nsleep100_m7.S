@@ -26,7 +26,7 @@
 .global mgos_nsleep100_impl
 .global mgos_nsleep100_loop_count
 
-.section .iram.mgos_nsleep100_impl
+.section .text.IRAM.mgos_nsleep100_impl
 .type mgos_nsleep100_impl, %function
 .align 4
 

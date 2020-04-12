@@ -1,11 +1,26 @@
+/*
+ * Copyright (c) 2004-2013 Sergey Lyubka
+ * Copyright (c) 2013-2020 Cesanta Software Limited
+ * All rights reserved
+ *
+ * This software is dual-licensed: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation. For the terms of this
+ * license, see <http://www.gnu.org/licenses/>.
+ *
+ * You are free to use this software under the terms of the GNU General
+ * Public License, but WITHOUT ANY WARRANTY; without even the implied
+ * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ *
+ * Alternatively, you can license this software under a commercial
+ * license, as set out in <https://www.cesanta.com/license>.
+ */
+
 #include "mongoose.h"
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_internal.h"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 #ifndef CS_MONGOOSE_SRC_INTERNAL_H_
 #define CS_MONGOOSE_SRC_INTERNAL_H_
@@ -38,7 +53,9 @@
 /* Amalgamated: #include "mg_http.h" */
 /* Amalgamated: #include "mg_net.h" */
 
+#ifndef MG_CTL_MSG_MESSAGE_SIZE
 #define MG_CTL_MSG_MESSAGE_SIZE 8192
+#endif
 
 /* internals that need to be accessible in unit tests */
 MG_INTERNAL struct mg_connection *mg_do_connect(struct mg_connection *nc,
@@ -85,6 +102,9 @@ extern void *(*test_calloc)(size_t count, size_t size);
 
 #if MG_ENABLE_HTTP
 struct mg_serve_http_opts;
+
+MG_INTERNAL struct mg_http_proto_data *mg_http_create_proto_data(
+    struct mg_connection *c);
 
 /*
  * Reassemble the content of the buffer (buf, blen) which should be
@@ -162,22 +182,6 @@ MG_INTERNAL int mg_sntp_parse_reply(const char *buf, int len,
 #ifdef MG_MODULE_LINES
 #line 1 "common/mg_mem.h"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef CS_COMMON_MG_MEM_H_
 #define CS_COMMON_MG_MEM_H_
@@ -210,22 +214,6 @@ extern "C" {
 #ifdef MG_MODULE_LINES
 #line 1 "common/cs_base64.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef EXCLUDE_COMMON
 
@@ -430,22 +418,6 @@ int cs_base64_decode(const unsigned char *s, int len, char *dst, int *dec_len) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/cs_dbg.h"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef CS_COMMON_CS_DBG_H_
 #define CS_COMMON_CS_DBG_H_
@@ -458,6 +430,10 @@ int cs_base64_decode(const unsigned char *s, int len, char *dst, int *dec_len) {
 
 #ifndef CS_ENABLE_DEBUG
 #define CS_ENABLE_DEBUG 0
+#endif
+
+#ifndef CS_LOG_PREFIX_LEN
+#define CS_LOG_PREFIX_LEN 24
 #endif
 
 #ifndef CS_LOG_ENABLE_TS_DIFF
@@ -490,51 +466,28 @@ enum cs_log_level {
 void cs_log_set_level(enum cs_log_level level);
 
 /*
- * Set log filter. NULL (a default) logs everything.
- * Otherwise, function name and file name will be tested against the given
- * pattern, and only matching messages will be printed.
+ * A comma-separated set of prefix=level.
+ * prefix is matched against the log prefix exactly as printed, including line
+ * number, but partial match is ok. Check stops on first matching entry.
+ * If nothing matches, default level is used.
  *
- * For the pattern syntax, refer to `mg_match_prefix()` in `str_util.h`.
+ * Examples:
+ *   main.c:=4 - everything from main C at verbose debug level.
+ *   mongoose.c=1,mjs.c=1,=4 - everything at verbose debug except mg_* and mjs_*
  *
- * Example:
- * ```c
- * void foo(void) {
- *   LOG(LL_INFO, ("hello from foo"));
- * }
- *
- * void bar(void) {
- *   LOG(LL_INFO, ("hello from bar"));
- * }
- *
- * void test(void) {
- *   cs_log_set_filter(NULL);
- *   foo();
- *   bar();
- *
- *   cs_log_set_filter("f*");
- *   foo();
- *   bar(); // Will NOT print anything
- *
- *   cs_log_set_filter("bar");
- *   foo(); // Will NOT print anything
- *   bar();
- * }
- * ```
  */
-void cs_log_set_filter(const char *pattern);
+void cs_log_set_file_level(const char *file_level);
 
 /*
- * Helper function which prints message prefix with the given `level`, function
- * name `func` and `filename`. If message should be printed (accordingly to the
- * current log level and filter), prints the prefix and returns 1, otherwise
- * returns 0.
+ * Helper function which prints message prefix with the given `level`.
+ * If message should be printed (according to the current log level
+ * and filter), prints the prefix and returns 1, otherwise returns 0.
  *
  * Clients should typically just use `LOG()` macro.
  */
-int cs_log_print_prefix(enum cs_log_level level, const char *func,
-                        const char *filename);
+int cs_log_print_prefix(enum cs_log_level level, const char *fname, int line);
 
-extern enum cs_log_level cs_log_threshold;
+extern enum cs_log_level cs_log_level;
 
 #if CS_ENABLE_STDIO
 
@@ -559,9 +512,11 @@ void cs_log_printf(const char *fmt, ...) PRINTF_LIKE(1, 2);
  * LOG(LL_DEBUG, ("my debug message: %d", 123));
  * ```
  */
-#define LOG(l, x)                                                    \
-  do {                                                               \
-    if (cs_log_print_prefix(l, __func__, __FILE__)) cs_log_printf x; \
+#define LOG(l, x)                                     \
+  do {                                                \
+    if (cs_log_print_prefix(l, __FILE__, __LINE__)) { \
+      cs_log_printf x;                                \
+    }                                                 \
   } while (0)
 
 #else
@@ -598,22 +553,6 @@ void cs_log_printf(const char *fmt, ...) PRINTF_LIKE(1, 2);
 #ifdef MG_MODULE_LINES
 #line 1 "common/cs_dbg.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 /* Amalgamated: #include "common/cs_dbg.h" */
 
@@ -624,7 +563,7 @@ void cs_log_printf(const char *fmt, ...) PRINTF_LIKE(1, 2);
 /* Amalgamated: #include "common/cs_time.h" */
 /* Amalgamated: #include "common/str_util.h" */
 
-enum cs_log_level cs_log_threshold WEAK =
+enum cs_log_level cs_log_level WEAK =
 #if CS_ENABLE_DEBUG
     LL_VERBOSE_DEBUG;
 #else
@@ -632,10 +571,9 @@ enum cs_log_level cs_log_threshold WEAK =
 #endif
 
 #if CS_ENABLE_STDIO
-static char *s_filter_pattern = NULL;
-static size_t s_filter_pattern_len;
+static char *s_file_level = NULL;
 
-void cs_log_set_filter(const char *pattern) WEAK;
+void cs_log_set_file_level(const char *file_level) WEAK;
 
 FILE *cs_log_file WEAK = NULL;
 
@@ -645,34 +583,62 @@ double cs_log_ts WEAK;
 
 enum cs_log_level cs_log_cur_msg_level WEAK = LL_NONE;
 
-void cs_log_set_filter(const char *pattern) {
-  free(s_filter_pattern);
-  if (pattern != NULL) {
-    s_filter_pattern = strdup(pattern);
-    s_filter_pattern_len = strlen(pattern);
+void cs_log_set_file_level(const char *file_level) {
+  char *fl = s_file_level;
+  if (file_level != NULL) {
+    s_file_level = strdup(file_level);
   } else {
-    s_filter_pattern = NULL;
-    s_filter_pattern_len = 0;
+    s_file_level = NULL;
   }
+  free(fl);
 }
 
-int cs_log_print_prefix(enum cs_log_level, const char *, const char *) WEAK;
-int cs_log_print_prefix(enum cs_log_level level, const char *func,
-                        const char *filename) {
-  char prefix[21];
+int cs_log_print_prefix(enum cs_log_level level, const char *file, int ln) WEAK;
+int cs_log_print_prefix(enum cs_log_level level, const char *file, int ln) {
+  char prefix[CS_LOG_PREFIX_LEN], *q;
+  const char *p;
+  size_t fl = 0, ll = 0, pl = 0;
 
-  if (level > cs_log_threshold) return 0;
-  if (s_filter_pattern != NULL &&
-      mg_match_prefix(s_filter_pattern, s_filter_pattern_len, func) == 0 &&
-      mg_match_prefix(s_filter_pattern, s_filter_pattern_len, filename) == 0) {
-    return 0;
+  if (level > cs_log_level && s_file_level == NULL) return 0;
+
+  p = file + strlen(file);
+
+  while (p != file) {
+    const char c = *(p - 1);
+    if (c == '/' || c == '\\') break;
+    p--;
+    fl++;
   }
 
-  strncpy(prefix, func, 20);
-  prefix[20] = '\0';
+  ll = (ln < 10000 ? (ln < 1000 ? (ln < 100 ? (ln < 10 ? 1 : 2) : 3) : 4) : 5);
+  if (fl > (sizeof(prefix) - ll - 2)) fl = (sizeof(prefix) - ll - 2);
+
+  pl = fl + 1 + ll;
+  memcpy(prefix, p, fl);
+  q = prefix + pl;
+  memset(q, ' ', sizeof(prefix) - pl);
+  do {
+    *(--q) = '0' + (ln % 10);
+    ln /= 10;
+  } while (ln > 0);
+  *(--q) = ':';
+
+  if (s_file_level != NULL) {
+    enum cs_log_level pll = cs_log_level;
+    struct mg_str fl = mg_mk_str(s_file_level), ps = MG_MK_STR_N(prefix, pl);
+    struct mg_str k, v;
+    while ((fl = mg_next_comma_list_entry_n(fl, &k, &v)).p != NULL) {
+      bool yes = !(!mg_str_starts_with(ps, k) || v.len == 0);
+      if (!yes) continue;
+      pll = (enum cs_log_level)(*v.p - '0');
+      break;
+    }
+    if (level > pll) return 0;
+  }
+
   if (cs_log_file == NULL) cs_log_file = stderr;
   cs_log_cur_msg_level = level;
-  fprintf(cs_log_file, "%-20s ", prefix);
+  fwrite(prefix, 1, sizeof(prefix), cs_log_file);
 #if CS_LOG_ENABLE_TS_DIFF
   {
     double now = cs_time();
@@ -701,15 +667,15 @@ void cs_log_set_file(FILE *file) {
 
 #else
 
-void cs_log_set_filter(const char *pattern) {
-  (void) pattern;
+void cs_log_set_file_level(const char *file_level) {
+  (void) file_level;
 }
 
 #endif /* CS_ENABLE_STDIO */
 
 void cs_log_set_level(enum cs_log_level level) WEAK;
 void cs_log_set_level(enum cs_log_level level) {
-  cs_log_threshold = level;
+  cs_log_level = level;
 #if CS_LOG_ENABLE_TS_DIFF && CS_ENABLE_STDIO
   cs_log_ts = cs_time();
 #endif
@@ -717,22 +683,6 @@ void cs_log_set_level(enum cs_log_level level) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/cs_dirent.h"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef CS_COMMON_CS_DIRENT_H_
 #define CS_COMMON_CS_DIRENT_H_
@@ -771,22 +721,6 @@ struct dirent *readdir(DIR *dir);
 #ifdef MG_MODULE_LINES
 #line 1 "common/cs_dirent.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef EXCLUDE_COMMON
 
@@ -882,22 +816,6 @@ typedef int cs_dirent_dummy;
 #ifdef MG_MODULE_LINES
 #line 1 "common/cs_time.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 /* Amalgamated: #include "common/cs_time.h" */
 
@@ -980,22 +898,6 @@ double cs_timegm(const struct tm *tm) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/cs_endian.h"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef CS_COMMON_CS_ENDIAN_H_
 #define CS_COMMON_CS_ENDIAN_H_
@@ -1497,22 +1399,6 @@ void cs_hmac_sha1(const unsigned char *key, size_t keylen,
 #ifdef MG_MODULE_LINES
 #line 1 "common/mbuf.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef EXCLUDE_COMMON
 
@@ -1612,6 +1498,22 @@ size_t mbuf_append(struct mbuf *a, const void *buf, size_t len) {
   return mbuf_insert(a, a->len, buf, len);
 }
 
+size_t mbuf_append_and_free(struct mbuf *a, void *buf, size_t len) WEAK;
+size_t mbuf_append_and_free(struct mbuf *a, void *data, size_t len) {
+  size_t ret;
+  /* Optimization: if the buffer is currently empty,
+   * take over the user-provided buffer. */
+  if (a->len == 0) {
+    if (a->buf != NULL) free(a->buf);
+    a->buf = (char *) data;
+    a->len = a->size = len;
+    return len;
+  }
+  ret = mbuf_insert(a, a->len, data, len);
+  free(data);
+  return ret;
+}
+
 void mbuf_remove(struct mbuf *mb, size_t n) WEAK;
 void mbuf_remove(struct mbuf *mb, size_t n) {
   if (n > 0 && n <= mb->len) {
@@ -1620,31 +1522,27 @@ void mbuf_remove(struct mbuf *mb, size_t n) {
   }
 }
 
+void mbuf_clear(struct mbuf *mb) WEAK;
+void mbuf_clear(struct mbuf *mb) {
+  mb->len = 0;
+}
+
+void mbuf_move(struct mbuf *from, struct mbuf *to) WEAK;
+void mbuf_move(struct mbuf *from, struct mbuf *to) {
+  memcpy(to, from, sizeof(*to));
+  memset(from, 0, sizeof(*from));
+}
+
 #endif /* EXCLUDE_COMMON */
 #ifdef MG_MODULE_LINES
 #line 1 "common/mg_str.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 /* Amalgamated: #include "common/mg_mem.h" */
 /* Amalgamated: #include "common/mg_str.h" */
 /* Amalgamated: #include "common/platform.h" */
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1721,8 +1619,10 @@ int mg_strcmp(const struct mg_str str1, const struct mg_str str2) WEAK;
 int mg_strcmp(const struct mg_str str1, const struct mg_str str2) {
   size_t i = 0;
   while (i < str1.len && i < str2.len) {
-    if (str1.p[i] < str2.p[i]) return -1;
-    if (str1.p[i] > str2.p[i]) return 1;
+    int c1 = str1.p[i];
+    int c2 = str2.p[i];
+    if (c1 < c2) return -1;
+    if (c1 > c2) return 1;
     i++;
   }
   if (i < str1.len) return 1;
@@ -1742,6 +1642,29 @@ int mg_strncmp(const struct mg_str str1, const struct mg_str str2, size_t n) {
     s2.len = n;
   }
   return mg_strcmp(s1, s2);
+}
+
+int mg_strcasecmp(const struct mg_str str1, const struct mg_str str2) WEAK;
+int mg_strcasecmp(const struct mg_str str1, const struct mg_str str2) {
+  size_t i = 0;
+  while (i < str1.len && i < str2.len) {
+    int c1 = tolower((int) str1.p[i]);
+    int c2 = tolower((int) str2.p[i]);
+    if (c1 < c2) return -1;
+    if (c1 > c2) return 1;
+    i++;
+  }
+  if (i < str1.len) return 1;
+  if (i < str2.len) return -1;
+  return 0;
+}
+
+void mg_strfree(struct mg_str *s) WEAK;
+void mg_strfree(struct mg_str *s) {
+  char *sp = (char *) s->p;
+  s->p = NULL;
+  s->len = 0;
+  if (sp != NULL) free(sp);
 }
 
 const char *mg_strstr(const struct mg_str haystack,
@@ -1769,25 +1692,16 @@ struct mg_str mg_strstrip(struct mg_str s) {
   }
   return s;
 }
+
+int mg_str_starts_with(struct mg_str s, struct mg_str prefix) WEAK;
+int mg_str_starts_with(struct mg_str s, struct mg_str prefix) {
+  const struct mg_str sp = MG_MK_STR_N(s.p, prefix.len);
+  if (s.len < prefix.len) return 0;
+  return (mg_strcmp(sp, prefix) == 0);
+}
 #ifdef MG_MODULE_LINES
 #line 1 "common/str_util.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef EXCLUDE_COMMON
 
@@ -2307,23 +2221,6 @@ size_t mg_match_prefix(const char *pattern, int pattern_len, const char *str) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_net.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- *
- * This software is dual-licensed: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation. For the terms of this
- * license, see <http://www.gnu.org/licenses/>.
- *
- * You are free to use this software under the terms of the GNU General
- * Public License, but WITHOUT ANY WARRANTY; without even the implied
- * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See the GNU General Public License for more details.
- *
- * Alternatively, you can license this software under a commercial
- * license, as set out in <https://www.cesanta.com/license>.
- */
 
 /* Amalgamated: #include "common/cs_time.h" */
 /* Amalgamated: #include "mg_dns.h" */
@@ -2437,8 +2334,16 @@ MG_INTERNAL size_t recv_avail_size(struct mg_connection *conn, size_t max) {
 static int mg_do_recv(struct mg_connection *nc);
 
 int mg_if_poll(struct mg_connection *nc, double now) {
-  if ((nc->flags & MG_F_CLOSE_IMMEDIATELY) ||
-      (nc->send_mbuf.len == 0 && (nc->flags & MG_F_SEND_AND_CLOSE))) {
+  if (nc->flags & MG_F_CLOSE_IMMEDIATELY) {
+    mg_close_conn(nc);
+    return 0;
+  } else if (nc->flags & MG_F_SEND_AND_CLOSE) {
+    if (nc->send_mbuf.len == 0) {
+      nc->flags |= MG_F_CLOSE_IMMEDIATELY;
+      mg_close_conn(nc);
+      return 0;
+    }
+  } else if (nc->flags & MG_F_RECV_AND_CLOSE) {
     mg_close_conn(nc);
     return 0;
   }
@@ -2481,6 +2386,13 @@ void mg_destroy_conn(struct mg_connection *conn, int destroy_if) {
 }
 
 void mg_close_conn(struct mg_connection *conn) {
+  /* See if there's any remaining data to deliver. Skip if user completely
+   * throttled the connection there will be no progress anyway. */
+  if (conn->sock != INVALID_SOCKET && mg_do_recv(conn) == -2) {
+    /* Receive is throttled, wait. */
+    conn->flags |= MG_F_RECV_AND_CLOSE;
+    return;
+  }
 #if MG_ENABLE_SSL
   if (conn->flags & MG_F_SSL_HANDSHAKE_DONE) {
     mg_ssl_if_conn_close_notify(conn);
@@ -2571,6 +2483,7 @@ void mg_mgr_free(struct mg_mgr *m) {
 
   for (conn = m->active_connections; conn != NULL; conn = tmp_conn) {
     tmp_conn = conn->next;
+    conn->flags |= MG_F_CLOSE_IMMEDIATELY;
     mg_close_conn(conn);
   }
 
@@ -2634,8 +2547,8 @@ static int mg_resolve2(const char *host, struct in_addr *ina) {
     return 0;
   }
   for (p = servinfo; p != NULL; p = p->ai_next) {
-    memcpy(&h, &p->ai_addr, sizeof(struct sockaddr_in *));
-    memcpy(ina, &h->sin_addr, sizeof(ina));
+    memcpy(&h, &p->ai_addr, sizeof(h));
+    memcpy(ina, &h->sin_addr, sizeof(*ina));
   }
   freeaddrinfo(servinfo);
   return 1;
@@ -2833,7 +2746,7 @@ struct mg_connection *mg_if_accept_new_conn(struct mg_connection *lc) {
   nc->iface = lc->iface;
   if (lc->flags & MG_F_SSL) nc->flags |= MG_F_SSL;
   mg_add_conn(nc->mgr, nc);
-  LOG(LL_DEBUG, ("%p %p %d %d", lc, nc, nc->sock, (int) nc->flags));
+  LOG(LL_DEBUG, ("%p %p %d %#x", lc, nc, (int) nc->sock, (int) nc->flags));
   return nc;
 }
 
@@ -2874,18 +2787,23 @@ static int mg_do_recv(struct mg_connection *nc) {
       ((nc->flags & MG_F_LISTENING) && !(nc->flags & MG_F_UDP))) {
     return -1;
   }
-  len = recv_avail_size(nc, len);
-  if (len == 0) return -2;
-  if (nc->recv_mbuf.size < nc->recv_mbuf.len + len) {
-    mbuf_resize(&nc->recv_mbuf, nc->recv_mbuf.len + len);
-  }
-  buf = nc->recv_mbuf.buf + nc->recv_mbuf.len;
-  len = nc->recv_mbuf.size - nc->recv_mbuf.len;
-  if (nc->flags & MG_F_UDP) {
-    res = mg_recv_udp(nc, buf, len);
-  } else {
-    res = mg_recv_tcp(nc, buf, len);
-  }
+  do {
+    len = recv_avail_size(nc, len);
+    if (len == 0) {
+      res = -2;
+      break;
+    }
+    if (nc->recv_mbuf.size < nc->recv_mbuf.len + len) {
+      mbuf_resize(&nc->recv_mbuf, nc->recv_mbuf.len + len);
+    }
+    buf = nc->recv_mbuf.buf + nc->recv_mbuf.len;
+    len = nc->recv_mbuf.size - nc->recv_mbuf.len;
+    if (nc->flags & MG_F_UDP) {
+      res = mg_recv_udp(nc, buf, len);
+    } else {
+      res = mg_recv_tcp(nc, buf, len);
+    }
+  } while (res > 0 && !(nc->flags & (MG_F_CLOSE_IMMEDIATELY | MG_F_UDP)));
   return res;
 }
 
@@ -3002,7 +2920,9 @@ static int mg_recv_udp(struct mg_connection *nc, char *buf, size_t len) {
       mg_hexdump_connection(nc, nc->mgr->hexdump_file, buf, n, MG_EV_RECV);
     }
 #endif
-    mg_call(nc, NULL, nc->user_data, MG_EV_RECV, &n);
+    if (n != 0) {
+      mg_call(nc, NULL, nc->user_data, MG_EV_RECV, &n);
+    }
   }
 
 out:
@@ -3163,6 +3083,16 @@ struct mg_connection *mg_connect(struct mg_mgr *mgr, const char *address,
   return mg_connect_opt(mgr, address, MG_CB(callback, user_data), opts);
 }
 
+void mg_ev_handler_empty(struct mg_connection *c, int ev,
+                         void *ev_data MG_UD_ARG(void *user_data)) {
+  (void) c;
+  (void) ev;
+  (void) ev_data;
+#if MG_ENABLE_CALLBACK_USERDATA
+  (void) user_data;
+#endif
+}
+
 struct mg_connection *mg_connect_opt(struct mg_mgr *mgr, const char *address,
                                      MG_CB(mg_event_handler_t callback,
                                            void *user_data),
@@ -3173,6 +3103,8 @@ struct mg_connection *mg_connect_opt(struct mg_mgr *mgr, const char *address,
   char host[MG_MAX_HOST_LEN];
 
   MG_COPY_COMMON_CONNECTION_OPTIONS(&add_sock_opts, &opts);
+
+  if (callback == NULL) callback = mg_ev_handler_empty;
 
   if ((nc = mg_create_connection(mgr, callback, add_sock_opts)) == NULL) {
     return NULL;
@@ -3287,10 +3219,7 @@ struct mg_connection *mg_bind_opt(struct mg_mgr *mgr, const char *address,
   opts.user_data = user_data;
 #endif
 
-  if (callback == NULL) {
-    MG_SET_PTRPTR(opts.error_string, "handler is required");
-    return NULL;
-  }
+  if (callback == NULL) callback = mg_ev_handler_empty;
 
   MG_COPY_COMMON_CONNECTION_OPTIONS(&add_sock_opts, &opts);
 
@@ -3488,10 +3417,6 @@ double mg_time(void) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_net_if_socket.h"
 #endif
-/*
- * Copyright (c) 2014-2016 Cesanta Software Limited
- * All rights reserved
- */
 
 #ifndef CS_MONGOOSE_SRC_NET_IF_SOCKET_H_
 #define CS_MONGOOSE_SRC_NET_IF_SOCKET_H_
@@ -3516,10 +3441,6 @@ extern const struct mg_iface_vtable mg_socket_iface_vtable;
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_net_if_socks.h"
 #endif
-/*
-* Copyright (c) 2014-2017 Cesanta Software Limited
-* All rights reserved
-*/
 
 #ifndef CS_MONGOOSE_SRC_NET_IF_SOCKS_H_
 #define CS_MONGOOSE_SRC_NET_IF_SOCKS_H_
@@ -3597,23 +3518,6 @@ double mg_mgr_min_timer(const struct mg_mgr *mgr) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_net_if_null.c"
 #endif
-/*
- * Copyright (c) 2018 Cesanta Software Limited
- * All rights reserved
- *
- * This software is dual-licensed: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation. For the terms of this
- * license, see <http://www.gnu.org/licenses/>.
- *
- * You are free to use this software under the terms of the GNU General
- * Public License, but WITHOUT ANY WARRANTY; without even the implied
- * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See the GNU General Public License for more details.
- *
- * Alternatively, you can license this software under a commercial
- * license, as set out in <https://www.cesanta.com/license>.
- */
 
 static void mg_null_if_connect_tcp(struct mg_connection *c,
                                    const union socket_address *sa) {
@@ -3741,10 +3645,6 @@ const struct mg_iface_vtable mg_default_iface_vtable = MG_NULL_IFACE_VTABLE;
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_net_if_socket.c"
 #endif
-/*
- * Copyright (c) 2014-2016 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_NET_IF_SOCKET
 
@@ -3790,8 +3690,8 @@ void mg_socket_if_connect_tcp(struct mg_connection *nc,
 #endif
   rc = connect(nc->sock, &sa->sa, sizeof(sa->sin));
   nc->err = rc < 0 && mg_is_error() ? mg_get_errno() : 0;
-  DBG(("%p sock %d rc %d errno %d err %d", nc, nc->sock, rc, mg_get_errno(),
-       nc->err));
+  DBG(("%p sock %d rc %d errno %d err %d", nc, (int) nc->sock, rc,
+      mg_get_errno(), nc->err));
 }
 
 void mg_socket_if_connect_udp(struct mg_connection *nc) {
@@ -3961,8 +3861,8 @@ void mg_mgr_handle_conn(struct mg_connection *nc, int fd_flags, double now) {
   int worth_logging =
       fd_flags != 0 || (nc->flags & (MG_F_WANT_READ | MG_F_WANT_WRITE));
   if (worth_logging) {
-    DBG(("%p fd=%d fd_flags=%d nc_flags=0x%lx rmbl=%d smbl=%d", nc, nc->sock,
-         fd_flags, nc->flags, (int) nc->recv_mbuf.len,
+    DBG(("%p fd=%d fd_flags=%d nc_flags=0x%lx rmbl=%d smbl=%d", nc,
+         (int) nc->sock, fd_flags, nc->flags, (int) nc->recv_mbuf.len,
          (int) nc->send_mbuf.len));
   }
 
@@ -4014,7 +3914,7 @@ void mg_mgr_handle_conn(struct mg_connection *nc, int fd_flags, double now) {
   if (fd_flags & _MG_F_FD_CAN_WRITE) mg_if_can_send_cb(nc);
 
   if (worth_logging) {
-    DBG(("%p after fd=%d nc_flags=0x%lx rmbl=%d smbl=%d", nc, nc->sock,
+    DBG(("%p after fd=%d nc_flags=0x%lx rmbl=%d smbl=%d", nc, (int) nc->sock,
          nc->flags, (int) nc->recv_mbuf.len, (int) nc->send_mbuf.len));
   }
 }
@@ -4022,8 +3922,7 @@ void mg_mgr_handle_conn(struct mg_connection *nc, int fd_flags, double now) {
 #if MG_ENABLE_BROADCAST
 static void mg_mgr_handle_ctl_sock(struct mg_mgr *mgr) {
   struct ctl_msg ctl_msg;
-  int len =
-      (int) MG_RECV_FUNC(mgr->ctl[1], (char *) &ctl_msg, sizeof(ctl_msg), 0);
+  int len = (int) MG_RECV_FUNC(mgr->ctl[1], (char *) &ctl_msg, sizeof(ctl_msg), 0);
   size_t dummy = MG_SEND_FUNC(mgr->ctl[1], ctl_msg.message, 1, 0);
   DBG(("read %d from ctl socket", len));
   (void) dummy; /* https://gcc.gnu.org/bugzilla/show_bug.cgi?id=25509 */
@@ -4042,7 +3941,7 @@ void mg_socket_if_sock_set(struct mg_connection *nc, sock_t sock) {
   mg_set_non_blocking_mode(sock);
   mg_set_close_on_exec(sock);
   nc->sock = sock;
-  DBG(("%p %d", nc, sock));
+  DBG(("%p %d", nc, (int) sock));
 }
 
 void mg_socket_if_init(struct mg_iface *iface) {
@@ -4326,10 +4225,6 @@ const struct mg_iface_vtable mg_default_iface_vtable = MG_SOCKET_IFACE_VTABLE;
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_net_if_socks.c"
 #endif
-/*
- * Copyright (c) 2014-2016 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_SOCKS
 
@@ -4566,10 +4461,6 @@ struct mg_iface *mg_socks_mk_iface(struct mg_mgr *mgr, const char *proxy_addr) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_ssl_if_openssl.c"
 #endif
-/*
- * Copyright (c) 2014-2016 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_SSL && MG_SSL_IF == MG_SSL_IF_OPENSSL
 
@@ -4589,7 +4480,7 @@ struct mg_ssl_if_ctx {
   size_t identity_len;
 };
 
-void mg_ssl_if_init() {
+void mg_ssl_if_init(void) {
   SSL_library_init();
 }
 
@@ -4878,7 +4769,7 @@ static enum mg_ssl_if_result mg_set_cipher_list(SSL_CTX *ctx, const char *cl) {
               : MG_SSL_ERROR);
 }
 
-#ifndef KR_VERSION
+#if !defined(KR_VERSION) && !defined(LIBRESSL_VERSION_NUMBER)
 static unsigned int mg_ssl_if_ossl_psk_cb(SSL *ssl, const char *hint,
                                           char *identity,
                                           unsigned int max_identity_len,
@@ -4944,10 +4835,10 @@ static enum mg_ssl_if_result mg_ssl_if_ossl_set_psk(struct mg_ssl_if_ctx *ctx,
   (void) ctx;
   (void) identity;
   (void) key_str;
-  /* Krypton does not support PSK. */
+  /* Krypton / LibreSSL does not support PSK. */
   return MG_SSL_ERROR;
 }
-#endif /* defined(KR_VERSION) */
+#endif /* !defined(KR_VERSION) && !defined(LIBRESSL_VERSION_NUMBER) */
 
 const char *mg_set_ssl(struct mg_connection *nc, const char *cert,
                        const char *ca_cert) {
@@ -4966,10 +4857,6 @@ const char *mg_set_ssl(struct mg_connection *nc, const char *cert,
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_ssl_if_mbedtls.c"
 #endif
-/*
- * Copyright (c) 2014-2016 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_SSL && MG_SSL_IF == MG_SSL_IF_MBEDTLS
 
@@ -5012,7 +4899,11 @@ struct mg_ssl_if_ctx {
   mbedtls_ssl_context *ssl;
   mbedtls_x509_crt *cert;
   mbedtls_pk_context *key;
+#ifdef MBEDTLS_X509_CA_CHAIN_ON_DISK
+  char *ca_chain_file;
+#else
   mbedtls_x509_crt *ca_cert;
+#endif
   struct mbuf cipher_suites;
   size_t saved_len;
 };
@@ -5020,7 +4911,7 @@ struct mg_ssl_if_ctx {
 /* Must be provided by the platform. ctx is struct mg_connection. */
 extern int mg_ssl_if_mbed_random(void *ctx, unsigned char *buf, size_t len);
 
-void mg_ssl_if_init() {
+void mg_ssl_if_init(void) {
   LOG(LL_INFO, ("%s", MBEDTLS_VERSION_STRING_FULL));
 }
 
@@ -5188,18 +5079,17 @@ static void mg_ssl_if_mbed_free_certs_and_keys(struct mg_ssl_if_ctx *ctx) {
     MG_FREE(ctx->key);
     ctx->key = NULL;
   }
+#ifdef MBEDTLS_X509_CA_CHAIN_ON_DISK
+  MG_FREE(ctx->ca_chain_file);
+  ctx->ca_chain_file = NULL;
+#else
   if (ctx->ca_cert != NULL) {
     mbedtls_ssl_conf_ca_chain(ctx->conf, NULL, NULL);
-#ifdef MBEDTLS_X509_CA_CHAIN_ON_DISK
-    if (ctx->conf->ca_chain_file != NULL) {
-      MG_FREE((void *) ctx->conf->ca_chain_file);
-      ctx->conf->ca_chain_file = NULL;
-    }
-#endif
     mbedtls_x509_crt_free(ctx->ca_cert);
     MG_FREE(ctx->ca_cert);
     ctx->ca_cert = NULL;
   }
+#endif
 }
 
 enum mg_ssl_if_result mg_ssl_if_handshake(struct mg_connection *nc) {
@@ -5280,11 +5170,11 @@ void mg_ssl_if_conn_free(struct mg_connection *nc) {
     mbedtls_ssl_free(ctx->ssl);
     MG_FREE(ctx->ssl);
   }
-  mg_ssl_if_mbed_free_certs_and_keys(ctx);
   if (ctx->conf != NULL) {
     mbedtls_ssl_config_free(ctx->conf);
     MG_FREE(ctx->conf);
   }
+  mg_ssl_if_mbed_free_certs_and_keys(ctx);
   mbuf_free(&ctx->cipher_suites);
   memset(ctx, 0, sizeof(*ctx));
   MG_FREE(ctx);
@@ -5296,12 +5186,15 @@ static enum mg_ssl_if_result mg_use_ca_cert(struct mg_ssl_if_ctx *ctx,
     mbedtls_ssl_conf_authmode(ctx->conf, MBEDTLS_SSL_VERIFY_NONE);
     return MG_SSL_OK;
   }
+#ifdef MBEDTLS_X509_CA_CHAIN_ON_DISK
+  ctx->ca_chain_file = strdup(ca_cert);
+  if (ctx->ca_chain_file == NULL) return MG_SSL_ERROR;
+  if (mbedtls_ssl_conf_ca_chain_file(ctx->conf, ctx->ca_chain_file, NULL) != 0) {
+    return MG_SSL_ERROR;
+  }
+#else
   ctx->ca_cert = (mbedtls_x509_crt *) MG_CALLOC(1, sizeof(*ctx->ca_cert));
   mbedtls_x509_crt_init(ctx->ca_cert);
-#ifdef MBEDTLS_X509_CA_CHAIN_ON_DISK
-  ca_cert = strdup(ca_cert);
-  mbedtls_ssl_conf_ca_chain_file(ctx->conf, ca_cert, NULL);
-#else
   if (mbedtls_x509_crt_parse_file(ctx->ca_cert, ca_cert) != 0) {
     return MG_SSL_ERROR;
   }
@@ -5478,10 +5371,6 @@ int mg_ssl_if_mbed_random(void *ctx, unsigned char *buf, size_t len) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_uri.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 /* Amalgamated: #include "mg_internal.h" */
 /* Amalgamated: #include "mg_uri.h" */
@@ -5742,10 +5631,6 @@ out:
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_http.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_HTTP
 
@@ -5884,6 +5769,7 @@ struct mg_http_multipart_stream {
   void *user_data;
   enum mg_http_multipart_stream_state state;
   int processing_part;
+  int data_avail;
 };
 
 struct mg_reverse_proxy_data {
@@ -5920,20 +5806,29 @@ struct mg_http_proto_data {
   size_t rcvd; /* How many bytes we have received. */
 };
 
-static void mg_http_conn_destructor(void *proto_data);
+static void mg_http_proto_data_destructor(void *proto_data);
+
 struct mg_connection *mg_connect_http_base(
     struct mg_mgr *mgr, MG_CB(mg_event_handler_t ev_handler, void *user_data),
     struct mg_connect_opts opts, const char *scheme1, const char *scheme2,
     const char *scheme_ssl1, const char *scheme_ssl2, const char *url,
     struct mg_str *path, struct mg_str *user_info, struct mg_str *host);
 
+MG_INTERNAL struct mg_http_proto_data *mg_http_create_proto_data(
+    struct mg_connection *c) {
+  /* If we have proto data from previous connection, flush it. */
+  if (c->proto_data != NULL) {
+    void *pd = c->proto_data;
+    c->proto_data = NULL;
+    mg_http_proto_data_destructor(pd);
+  }
+  c->proto_data = MG_CALLOC(1, sizeof(struct mg_http_proto_data));
+  c->proto_data_destructor = mg_http_proto_data_destructor;
+  return (struct mg_http_proto_data *) c->proto_data;
+}
+
 static struct mg_http_proto_data *mg_http_get_proto_data(
     struct mg_connection *c) {
-  if (c->proto_data == NULL) {
-    c->proto_data = MG_CALLOC(1, sizeof(struct mg_http_proto_data));
-    c->proto_data_destructor = mg_http_conn_destructor;
-  }
-
   return (struct mg_http_proto_data *) c->proto_data;
 }
 
@@ -5989,7 +5884,7 @@ static void mg_http_free_reverse_proxy_data(struct mg_reverse_proxy_data *rpd) {
   }
 }
 
-static void mg_http_conn_destructor(void *proto_data) {
+static void mg_http_proto_data_destructor(void *proto_data) {
   struct mg_http_proto_data *pd = (struct mg_http_proto_data *) proto_data;
 #if MG_ENABLE_FILESYSTEM
   mg_http_free_proto_data_file(&pd->file);
@@ -6062,37 +5957,53 @@ static const struct {
     MIME_ENTRY("asf", "video/x-ms-asf"),
     MIME_ENTRY("avi", "video/x-msvideo"),
     MIME_ENTRY("bmp", "image/bmp"),
-    {NULL, 0, NULL}};
+    {NULL, 0, NULL},
+};
 
-static struct mg_str mg_get_mime_type(const char *path, const char *dflt,
-                                      const struct mg_serve_http_opts *opts) {
+static struct mg_str mg_get_mime_types_entry(struct mg_str path) {
+  size_t i;
+  for (i = 0; mg_static_builtin_mime_types[i].extension != NULL; i++) {
+    if (path.len < mg_static_builtin_mime_types[i].ext_len + 1) continue;
+    struct mg_str ext = MG_MK_STR_N(mg_static_builtin_mime_types[i].extension,
+                                    mg_static_builtin_mime_types[i].ext_len);
+    struct mg_str pext = MG_MK_STR_N(path.p + (path.len - ext.len), ext.len);
+    if (pext.p[-1] == '.' && mg_strcasecmp(ext, pext) == 0) {
+      return mg_mk_str(mg_static_builtin_mime_types[i].mime_type);
+    }
+  }
+  return mg_mk_str(NULL);
+}
+
+MG_INTERNAL int mg_get_mime_type_encoding(
+    struct mg_str path, struct mg_str *type, struct mg_str *encoding,
+    const struct mg_serve_http_opts *opts) {
   const char *ext, *overrides;
-  size_t i, path_len;
-  struct mg_str r, k, v;
-
-  path_len = strlen(path);
+  struct mg_str k, v;
 
   overrides = opts->custom_mime_types;
   while ((overrides = mg_next_comma_list_entry(overrides, &k, &v)) != NULL) {
-    ext = path + (path_len - k.len);
-    if (path_len > k.len && mg_vcasecmp(&k, ext) == 0) {
-      return v;
+    ext = path.p + (path.len - k.len);
+    if (path.len > k.len && mg_vcasecmp(&k, ext) == 0) {
+      *type = v;
+      return 1;
     }
   }
 
-  for (i = 0; mg_static_builtin_mime_types[i].extension != NULL; i++) {
-    ext = path + (path_len - mg_static_builtin_mime_types[i].ext_len);
-    if (path_len > mg_static_builtin_mime_types[i].ext_len && ext[-1] == '.' &&
-        mg_casecmp(ext, mg_static_builtin_mime_types[i].extension) == 0) {
-      r.p = mg_static_builtin_mime_types[i].mime_type;
-      r.len = strlen(r.p);
-      return r;
+  *type = mg_get_mime_types_entry(path);
+
+  /* Check for .html.gz, .js.gz, etc. */
+  if (mg_vcmp(type, "application/x-gunzip") == 0) {
+    struct mg_str path2 = mg_mk_str_n(path.p, path.len - 3);
+    struct mg_str type2 = mg_get_mime_types_entry(path2);
+    LOG(LL_ERROR, ("'%.*s' '%.*s' '%.*s'", (int) path.len, path.p,
+                   (int) path2.len, path2.p, (int) type2.len, type2.p));
+    if (type2.len > 0) {
+      *type = type2;
+      *encoding = mg_mk_str("gzip");
     }
   }
 
-  r.p = dflt;
-  r.len = strlen(r.p);
-  return r;
+  return (type->len > 0);
 }
 #endif
 
@@ -6189,7 +6100,7 @@ int mg_parse_http(const char *s, int n, struct http_message *hm, int is_req) {
     }
   } else {
     s = mg_skip(s, end, " ", &hm->proto);
-    if (end - s < 4 || s[3] != ' ') return -1;
+    if (end - s < 4 || s[0] < '0' || s[0] > '9' || s[3] != ' ') return -1;
     hm->resp_code = atoi(s);
     if (hm->resp_code < 100 || hm->resp_code >= 600) return -1;
     s += 4;
@@ -6262,7 +6173,8 @@ static void mg_http_transfer_file_data(struct mg_connection *nc) {
       /* Rate-limited */
     }
     if (pd->file.sent >= pd->file.cl) {
-      LOG(LL_DEBUG, ("%p done, %d bytes", nc, (int) pd->file.sent));
+      LOG(LL_DEBUG, ("%p done, %d bytes, ka %d", nc, (int) pd->file.sent,
+                     pd->file.keepalive));
       if (!pd->file.keepalive) nc->flags |= MG_F_SEND_AND_CLOSE;
       mg_http_free_proto_data_file(&pd->file);
     }
@@ -6398,11 +6310,11 @@ struct mg_http_endpoint *mg_http_get_endpoint_handler(struct mg_connection *nc,
   int matched, matched_max = 0;
   struct mg_http_endpoint *ep;
 
-  if (nc == NULL) {
-    return NULL;
-  }
+  if (nc == NULL) return NULL;
 
   pd = mg_http_get_proto_data(nc);
+
+  if (pd == NULL) return NULL;
 
   ep = pd->endpoints;
   while (ep != NULL) {
@@ -6475,13 +6387,13 @@ void mg_http_handler(struct mg_connection *nc, int ev,
   if (ev == MG_EV_CLOSE) {
 #if MG_ENABLE_HTTP_CGI
     /* Close associated CGI forwarder connection */
-    if (pd->cgi.cgi_nc != NULL) {
+    if (pd != NULL && pd->cgi.cgi_nc != NULL) {
       pd->cgi.cgi_nc->user_data = NULL;
       pd->cgi.cgi_nc->flags |= MG_F_CLOSE_IMMEDIATELY;
     }
 #endif
 #if MG_ENABLE_HTTP_STREAMING_MULTIPART
-    if (pd->mp_stream.boundary != NULL) {
+    if (pd != NULL && pd->mp_stream.boundary != NULL) {
       /*
        * Multipart message is in progress, but connection is closed.
        * Finish part and request with an error flag.
@@ -6489,6 +6401,7 @@ void mg_http_handler(struct mg_connection *nc, int ev,
       struct mg_http_multipart_part mp;
       memset(&mp, 0, sizeof(mp));
       mp.status = -1;
+      mp.user_data = pd->mp_stream.user_data;
       mp.var_name = pd->mp_stream.var_name;
       mp.file_name = pd->mp_stream.file_name;
       mg_call(nc, (pd->endpoint_handler ? pd->endpoint_handler : nc->handler),
@@ -6502,39 +6415,54 @@ void mg_http_handler(struct mg_connection *nc, int ev,
         if (io->len > 0 &&
             (req_len = mg_parse_http(io->buf, io->len, hm, is_req)) > 0) {
       /*
-      * For HTTP messages without Content-Length, always send HTTP message
-      * before MG_EV_CLOSE message.
-      */
+       * For HTTP messages without Content-Length, always send HTTP message
+       * before MG_EV_CLOSE message.
+       */
       int ev2 = is_req ? MG_EV_HTTP_REQUEST : MG_EV_HTTP_REPLY;
       hm->message.len = io->len;
       hm->body.len = io->buf + io->len - hm->body.p;
       deliver_chunk(nc, hm, req_len);
       mg_http_call_endpoint_handler(nc, ev2, hm);
     }
-    pd->rcvd = 0;
+    if (pd != NULL && pd->endpoint_handler != NULL &&
+        pd->endpoint_handler != nc->handler) {
+      mg_call(nc, pd->endpoint_handler, nc->user_data, ev, NULL);
+    }
   }
 
 #if MG_ENABLE_FILESYSTEM
-  if (pd->file.fp != NULL) {
+  if (pd != NULL && pd->file.fp != NULL) {
     mg_http_transfer_file_data(nc);
   }
 #endif
 
   mg_call(nc, nc->handler, nc->user_data, ev, ev_data);
 
+#if MG_ENABLE_HTTP_STREAMING_MULTIPART
+  if (pd != NULL && pd->mp_stream.boundary != NULL &&
+      (ev == MG_EV_RECV || ev == MG_EV_POLL)) {
+    if (ev == MG_EV_RECV) {
+      pd->rcvd += *(int *) ev_data;
+      mg_http_multipart_continue(nc);
+    } else if (pd->mp_stream.data_avail) {
+      /* Try re-delivering the data. */
+      mg_http_multipart_continue(nc);
+    }
+    return;
+  }
+#endif /* MG_ENABLE_HTTP_STREAMING_MULTIPART */
+
   if (ev == MG_EV_RECV) {
     struct mg_str *s;
-    pd->rcvd += *(int *) ev_data;
-
-#if MG_ENABLE_HTTP_STREAMING_MULTIPART
-    if (pd->mp_stream.boundary != NULL) {
-      mg_http_multipart_continue(nc);
-      return;
-    }
-#endif /* MG_ENABLE_HTTP_STREAMING_MULTIPART */
 
   again:
     req_len = mg_parse_http(io->buf, io->len, hm, is_req);
+
+    if (req_len > 0) {
+      /* New request - new proto data */
+      pd = mg_http_create_proto_data(nc);
+      pd->rcvd = io->len;
+    }
 
     if (req_len > 0 &&
         (s = mg_get_http_header(hm, "Transfer-Encoding")) != NULL &&
@@ -6560,16 +6488,23 @@ void mg_http_handler(struct mg_connection *nc, int ev,
       /* Do nothing, request is not yet fully buffered */
     }
 #if MG_ENABLE_HTTP_WEBSOCKET
-    else if (nc->listener == NULL &&
-             mg_get_http_header(hm, "Sec-WebSocket-Accept")) {
+    else if (nc->listener == NULL && (nc->flags & MG_F_IS_WEBSOCKET)) {
       /* We're websocket client, got handshake response from server. */
-      /* TODO(lsm): check the validity of accept Sec-WebSocket-Accept */
-      mbuf_remove(io, req_len);
-      nc->proto_handler = mg_ws_handler;
-      nc->flags |= MG_F_IS_WEBSOCKET;
-      mg_call(nc, nc->handler, nc->user_data, MG_EV_WEBSOCKET_HANDSHAKE_DONE,
-              NULL);
-      mg_ws_handler(nc, MG_EV_RECV, ev_data MG_UD_ARG(user_data));
+      DBG(("%p WebSocket upgrade code %d", nc, hm->resp_code));
+      if (hm->resp_code == 101 &&
+          mg_get_http_header(hm, "Sec-WebSocket-Accept")) {
+        /* TODO(lsm): check the validity of accept Sec-WebSocket-Accept */
+        mg_call(nc, nc->handler, nc->user_data, MG_EV_WEBSOCKET_HANDSHAKE_DONE,
+                hm);
+        mbuf_remove(io, req_len);
+        nc->proto_handler = mg_ws_handler;
+        mg_ws_handler(nc, MG_EV_RECV, ev_data MG_UD_ARG(user_data));
+      } else {
+        mg_call(nc, nc->handler, nc->user_data, MG_EV_WEBSOCKET_HANDSHAKE_DONE,
+                hm);
+        nc->flags |= MG_F_CLOSE_IMMEDIATELY;
+        mbuf_remove(io, req_len);
+      }
     } else if (nc->listener != NULL &&
                (vec = mg_get_http_header(hm, "Sec-WebSocket-Key")) != NULL) {
       struct mg_http_endpoint *ep;
@@ -6600,7 +6535,7 @@ void mg_http_handler(struct mg_connection *nc, int ev,
           mg_ws_handshake(nc, vec, hm);
         }
         mg_call(nc, nc->handler, nc->user_data, MG_EV_WEBSOCKET_HANDSHAKE_DONE,
-                NULL);
+                hm);
         mg_ws_handler(nc, MG_EV_RECV, ev_data MG_UD_ARG(user_data));
       }
     }
@@ -6640,18 +6575,7 @@ void mg_http_handler(struct mg_connection *nc, int ev,
       /* If this is a CGI request, we are not done either. */
       if (pd->cgi.cgi_nc != NULL) request_done = 0;
 #endif
-      if (request_done) {
-        /* This request is done but we may receive another on this connection.
-         */
-        mg_http_conn_destructor(pd);
-        nc->proto_data = NULL;
-        if (io->len > 0) {
-          /* We already have data for the next one, restart parsing. */
-          pd = mg_http_get_proto_data(nc);
-          pd->rcvd = io->len;
-          goto again;
-        }
-      }
+      if (request_done && io->len > 0) goto again;
     }
   }
 }
@@ -6727,8 +6651,9 @@ exit_mp:
 
 #define CONTENT_DISPOSITION "Content-Disposition: "
 
-static void mg_http_multipart_call_handler(struct mg_connection *c, int ev,
-                                           const char *data, size_t data_len) {
+static size_t mg_http_multipart_call_handler(struct mg_connection *c, int ev,
+                                             const char *data,
+                                             size_t data_len) {
   struct mg_http_multipart_part mp;
   struct mg_http_proto_data *pd = mg_http_get_proto_data(c);
   memset(&mp, 0, sizeof(mp));
@@ -6738,8 +6663,11 @@ static void mg_http_multipart_call_handler(struct mg_connection *c, int ev,
   mp.user_data = pd->mp_stream.user_data;
   mp.data.p = data;
   mp.data.len = data_len;
+  mp.num_data_consumed = data_len;
   mg_call(c, pd->endpoint_handler, c->user_data, ev, &mp);
   pd->mp_stream.user_data = mp.user_data;
+  pd->mp_stream.data_avail = (mp.num_data_consumed != data_len);
+  return mp.num_data_consumed;
 }
 
 static int mg_http_multipart_finalize(struct mg_connection *c) {
@@ -6877,19 +6805,25 @@ static int mg_http_multipart_continue_wait_for_chunk(struct mg_connection *c) {
 
   boundary = c_strnstr(io->buf, pd->mp_stream.boundary, io->len);
   if (boundary == NULL) {
-    int data_size = (io->len - (pd->mp_stream.boundary_len + 6));
-    if (data_size > 0) {
-      mg_http_multipart_call_handler(c, MG_EV_HTTP_PART_DATA, io->buf,
-                                     data_size);
-      mbuf_remove(io, data_size);
+    int data_len = (io->len - (pd->mp_stream.boundary_len + 6));
+    if (data_len > 0) {
+      size_t consumed = mg_http_multipart_call_handler(
+          c, MG_EV_HTTP_PART_DATA, io->buf, (size_t) data_len);
+      mbuf_remove(io, consumed);
     }
     return 0;
   } else if (boundary != NULL) {
-    int data_size = (boundary - io->buf - 4);
-    mg_http_multipart_call_handler(c, MG_EV_HTTP_PART_DATA, io->buf, data_size);
-    mbuf_remove(io, (boundary - io->buf));
-    pd->mp_stream.state = MPS_WAITING_FOR_BOUNDARY;
-    return 1;
+    size_t data_len = ((size_t)(boundary - io->buf) - 4);
+    size_t consumed = mg_http_multipart_call_handler(c, MG_EV_HTTP_PART_DATA,
+                                                     io->buf, data_len);
+    mbuf_remove(io, consumed);
+    if (consumed == data_len) {
+      mbuf_remove(io, 4);
+      pd->mp_stream.state = MPS_WAITING_FOR_BOUNDARY;
+      return 1;
+    } else {
+      return 0;
+    }
   } else {
     return 0;
   }
@@ -7169,12 +7103,15 @@ static int mg_http_parse_range_header(const struct mg_str *header, int64_t *a,
   return result;
 }
 
-void mg_http_serve_file(struct mg_connection *nc, struct http_message *hm,
-                        const char *path, const struct mg_str mime_type,
-                        const struct mg_str extra_headers) {
+void mg_http_serve_file_internal(struct mg_connection *nc,
+                                 struct http_message *hm, const char *path,
+                                 struct mg_str mime_type,
+                                 struct mg_str encoding,
+                                 struct mg_str extra_headers) {
   struct mg_http_proto_data *pd = mg_http_get_proto_data(nc);
   cs_stat_t st;
-  LOG(LL_DEBUG, ("%p [%s] %.*s", nc, path, (int) mime_type.len, mime_type.p));
+  LOG(LL_DEBUG, ("%p [%s] %.*s %.*s", nc, path, (int) mime_type.len,
+                 mime_type.p, (int) encoding.len, encoding.p));
   if (mg_stat(path, &st) != 0 || (pd->file.fp = mg_fopen(path, "rb")) == NULL) {
     int code, err = mg_get_errno();
     switch (err) {
@@ -7213,8 +7150,9 @@ void mg_http_serve_file(struct mg_connection *nc, struct http_message *hm,
       } else {
         status_code = 206;
         cl = r2 - r1 + 1;
-        snprintf(range, sizeof(range), "Content-Range: bytes %" INT64_FMT
-                                       "-%" INT64_FMT "/%" INT64_FMT "\r\n",
+        snprintf(range, sizeof(range),
+                 "Content-Range: bytes %" INT64_FMT "-%" INT64_FMT
+                 "/%" INT64_FMT "\r\n",
                  r1, r1 + cl - 1, (int64_t) st.st_size);
 #if _FILE_OFFSET_BITS == 64 || _POSIX_C_SOURCE >= 200112L || \
     _XOPEN_SOURCE >= 600
@@ -7239,13 +7177,6 @@ void mg_http_serve_file(struct mg_connection *nc, struct http_message *hm,
     mg_http_construct_etag(etag, sizeof(etag), &st);
     mg_gmt_time_string(current_time, sizeof(current_time), &t);
     mg_gmt_time_string(last_modified, sizeof(last_modified), &st.st_mtime);
-    /*
-     * Content length casted to size_t because:
-     * 1) that's the maximum buffer size anyway
-     * 2) ESP8266 RTOS SDK newlib vprintf cannot contain a 64bit arg at non-last
-     *    position
-     * TODO(mkm): fix ESP8266 RTOS SDK
-     */
     mg_send_response_line_s(nc, status_code, extra_headers);
     mg_printf(nc,
               "Date: %s\r\n"
@@ -7255,15 +7186,27 @@ void mg_http_serve_file(struct mg_connection *nc, struct http_message *hm,
               "Connection: %s\r\n"
               "Content-Length: %" SIZE_T_FMT
               "\r\n"
-              "%sEtag: %s\r\n\r\n",
+              "%s"
+              "Etag: %s\r\n",
               current_time, last_modified, (int) mime_type.len, mime_type.p,
               (pd->file.keepalive ? "keep-alive" : "close"), (size_t) cl, range,
               etag);
-
+    if (encoding.len > 0) {
+      mg_printf(nc, "Content-Encoding: %.*s\r\n", (int) encoding.len,
+                encoding.p);
+    }
+    mg_send(nc, "\r\n", 2);
     pd->file.cl = cl;
     pd->file.type = DATA_FILE;
     mg_http_transfer_file_data(nc);
   }
+}
+
+void mg_http_serve_file(struct mg_connection *nc, struct http_message *hm,
+                        const char *path, const struct mg_str mime_type,
+                        const struct mg_str extra_headers) {
+  mg_http_serve_file_internal(nc, hm, path, mime_type, mg_mk_str(NULL),
+                              extra_headers);
 }
 
 static void mg_http_serve_file2(struct mg_connection *nc, const char *path,
@@ -7275,8 +7218,12 @@ static void mg_http_serve_file2(struct mg_connection *nc, const char *path,
     return;
   }
 #endif
-  mg_http_serve_file(nc, hm, path, mg_get_mime_type(path, "text/plain", opts),
-                     mg_mk_str(opts->extra_headers));
+  struct mg_str type = MG_NULL_STR, encoding = MG_NULL_STR;
+  if (!mg_get_mime_type_encoding(mg_mk_str(path), &type, &encoding, opts)) {
+    type = mg_mk_str("text/plain");
+  }
+  mg_http_serve_file_internal(nc, hm, path, type, encoding,
+                              mg_mk_str(opts->extra_headers));
 }
 
 #endif
@@ -7552,7 +7499,7 @@ void cs_md5(char buf[33], ...) {
   va_list ap;
 
   va_start(ap, buf);
-  while ((p = va_arg(ap, const unsigned char *) ) != NULL) {
+  while ((p = va_arg(ap, const unsigned char *)) != NULL) {
     msgs[num_msgs] = p;
     msg_lens[num_msgs] = va_arg(ap, size_t);
     num_msgs++;
@@ -7667,7 +7614,7 @@ int mg_check_digest_auth(struct mg_str method, struct mg_str uri,
                          struct mg_str nc, struct mg_str nonce,
                          struct mg_str auth_domain, FILE *fp) {
   char buf[128], f_user[sizeof(buf)], f_ha1[sizeof(buf)], f_domain[sizeof(buf)];
-  char expected_response[33];
+  char exp_resp[33];
 
   /*
    * Read passwords file line by line. If should have htdigest format,
@@ -7681,11 +7628,10 @@ int mg_check_digest_auth(struct mg_str method, struct mg_str uri,
       /* Username and domain matched, check the password */
       mg_mkmd5resp(method.p, method.len, uri.p, uri.len, f_ha1, strlen(f_ha1),
                    nonce.p, nonce.len, nc.p, nc.len, cnonce.p, cnonce.len,
-                   qop.p, qop.len, expected_response);
-      LOG(LL_DEBUG,
-          ("%.*s %s %.*s %s", (int) username.len, username.p, f_domain,
-           (int) response.len, response.p, expected_response));
-      return mg_ncasecmp(response.p, expected_response, response.len) == 0;
+                   qop.p, qop.len, exp_resp);
+      LOG(LL_DEBUG, ("%.*s %s %.*s %s", (int) username.len, username.p,
+                     f_domain, (int) response.len, response.p, exp_resp));
+      return mg_ncasecmp(response.p, exp_resp, strlen(exp_resp)) == 0;
     }
   }
 
@@ -8184,13 +8130,13 @@ MG_INTERNAL int mg_uri_to_local_path(struct http_message *hm,
           *p++ = DIRSEP;
           /* No NULs and DIRSEPs in the component (percent-encoded). */
           for (i = 0; i < component.len; i++, p++) {
-            if (*p == '\0' || *p == DIRSEP
+            if (*p == '\0' ||
+                *p == DIRSEP
 #ifdef _WIN32
                 /* On Windows, "/" is also accepted, so check for that too. */
-                ||
-                *p == '/'
+                || *p == '/'
 #endif
-                ) {
+            ) {
               ok = 0;
               break;
             }
@@ -8280,9 +8226,11 @@ void mg_http_send_digest_auth_request(struct mg_connection *c,
             domain, (unsigned long) mg_time());
 }
 
-static void mg_http_send_options(struct mg_connection *nc) {
+static void mg_http_send_options(struct mg_connection *nc,
+                                 struct mg_serve_http_opts *opts) {
+  mg_send_response_line(nc, 200, opts->extra_headers);
   mg_printf(nc, "%s",
-            "HTTP/1.1 200 OK\r\nAllow: GET, POST, HEAD, CONNECT, OPTIONS"
+            "Allow: GET, POST, HEAD, CONNECT, OPTIONS"
 #if MG_ENABLE_HTTP_WEBDAV
             ", MKCOL, PUT, DELETE, PROPFIND, MOVE\r\nDAV: 1,2"
 #endif
@@ -8389,7 +8337,7 @@ MG_INTERNAL void mg_send_http_file(struct mg_connection *nc, char *path,
 #endif
 #endif /* MG_ENABLE_HTTP_WEBDAV */
   } else if (!mg_vcmp(&hm->method, "OPTIONS")) {
-    mg_http_send_options(nc);
+    mg_http_send_options(nc, opts);
   } else if (is_directory && index_file == NULL) {
 #if MG_ENABLE_DIRECTORY_LISTING
     if (strcmp(opts->enable_directory_listing, "yes") == 0) {
@@ -8401,7 +8349,9 @@ MG_INTERNAL void mg_send_http_file(struct mg_connection *nc, char *path,
     mg_http_send_error(nc, 501, NULL);
 #endif
   } else if (mg_is_not_modified(hm, &st)) {
-    mg_http_send_error(nc, 304, "Not Modified");
+    /* Note: not using mg_http_send_error in order to keep connection alive */
+    /* Note: passing extra headers allow users to control session cookies */
+    mg_send_head(nc, 304, 0, opts->extra_headers);
   } else {
     mg_http_serve_file2(nc, index_file ? index_file : path, hm, opts);
   }
@@ -8534,7 +8484,7 @@ void mg_file_upload_handler(struct mg_connection *nc, int ev, void *ev_data,
 #ifdef SPIFFS_ERR_FULL
             || mg_get_errno() == SPIFFS_ERR_FULL
 #endif
-            ) {
+        ) {
           mg_printf(nc,
                     "HTTP/1.1 413 Payload Too Large\r\n"
                     "Content-Type: text/plain\r\n"
@@ -8693,8 +8643,9 @@ struct mg_connection *mg_connect_http_opt(
   if (path.len == 0) path = mg_mk_str("/");
   if (host.len == 0) host = mg_mk_str("");
 
-  mg_printf(nc, "%s %.*s HTTP/1.1\r\nHost: %.*s\r\nContent-Length: %" SIZE_T_FMT
-                "\r\n%.*s%s\r\n%s",
+  mg_printf(nc,
+            "%s %.*s HTTP/1.1\r\nHost: %.*s\r\nContent-Length: %" SIZE_T_FMT
+            "\r\n%.*s%s\r\n%s",
             (post_data[0] == '\0' ? "GET" : "POST"), (int) path.len, path.p,
             (int) (path.p - host.p), host.p, strlen(post_data), (int) auth.len,
             (auth.buf == NULL ? "" : auth.buf), extra_headers, post_data);
@@ -8780,6 +8731,7 @@ void mg_register_http_endpoint_opt(struct mg_connection *nc,
   if (new_ep == NULL) return;
 
   pd = mg_http_get_proto_data(nc);
+  if (pd == NULL) pd = mg_http_create_proto_data(nc);
   new_ep->uri_pattern = mg_strdup(mg_mk_str(uri_path));
   if (opts.auth_domain != NULL && opts.auth_file != NULL) {
     new_ep->auth_domain = strdup(opts.auth_domain);
@@ -8802,7 +8754,7 @@ static void mg_http_call_endpoint_handler(struct mg_connection *nc, int ev,
 #if MG_ENABLE_HTTP_STREAMING_MULTIPART
       || ev == MG_EV_HTTP_MULTIPART_REQUEST
 #endif
-      ) {
+  ) {
     struct mg_http_endpoint *ep =
         mg_http_get_endpoint_handler(nc->listener, &hm->uri);
     if (ep != NULL) {
@@ -8838,10 +8790,6 @@ void mg_register_http_endpoint(struct mg_connection *nc, const char *uri_path,
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_http_cgi.c"
 #endif
-/*
- * Copyright (c) 2014-2016 Cesanta Software Limited
- * All rights reserved
- */
 
 #ifndef _WIN32
 #include <signal.h>
@@ -9354,10 +9302,6 @@ MG_INTERNAL void mg_http_free_proto_data_cgi(struct mg_http_proto_data_cgi *d) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_http_ssi.c"
 #endif
-/*
- * Copyright (c) 2014-2016 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_HTTP && MG_ENABLE_HTTP_SSI && MG_ENABLE_FILESYSTEM
 
@@ -9526,7 +9470,7 @@ MG_INTERNAL void mg_handle_ssi_request(struct mg_connection *nc,
                                        const char *path,
                                        const struct mg_serve_http_opts *opts) {
   FILE *fp;
-  struct mg_str mime_type;
+  struct mg_str mime_type = MG_NULL_STR, encoding = MG_NULL_STR;
   DBG(("%p %s", nc, path));
 
   if ((fp = mg_fopen(path, "rb")) == NULL) {
@@ -9534,12 +9478,20 @@ MG_INTERNAL void mg_handle_ssi_request(struct mg_connection *nc,
   } else {
     mg_set_close_on_exec((sock_t) fileno(fp));
 
-    mime_type = mg_get_mime_type(path, "text/plain", opts);
+    if (!mg_get_mime_type_encoding(mg_mk_str(path), &mime_type, &encoding,
+                                   opts)) {
+      mime_type = mg_mk_str("text/plain");
+    }
     mg_send_response_line(nc, 200, opts->extra_headers);
     mg_printf(nc,
               "Content-Type: %.*s\r\n"
-              "Connection: close\r\n\r\n",
+              "Connection: close\r\n",
               (int) mime_type.len, mime_type.p);
+    if (encoding.len > 0) {
+      mg_printf(nc, "Content-Encoding: %.*s\r\n", (int) encoding.len,
+                encoding.p);
+    }
+    mg_send(nc, "\r\n", 2);
     mg_send_ssi_file(nc, hm, path, fp, 0, opts);
     fclose(fp);
     nc->flags |= MG_F_SEND_AND_CLOSE;
@@ -9550,10 +9502,6 @@ MG_INTERNAL void mg_handle_ssi_request(struct mg_connection *nc,
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_http_webdav.c"
 #endif
-/*
- * Copyright (c) 2014-2016 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_HTTP && MG_ENABLE_HTTP_WEBDAV
 
@@ -9822,10 +9770,6 @@ MG_INTERNAL void mg_handle_put(struct mg_connection *nc, const char *path,
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_http_websocket.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_HTTP && MG_ENABLE_HTTP_WEBSOCKET
 
@@ -10302,6 +10246,8 @@ void mg_send_websocket_handshake3v(struct mg_connection *nc,
   }
   mg_printf(nc, "\r\n");
 
+  nc->flags |= MG_F_IS_WEBSOCKET;
+
   mbuf_free(&auth);
 }
 
@@ -10342,10 +10288,6 @@ struct mg_connection *mg_connect_ws(
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_util.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 /* Amalgamated: #include "common/cs_base64.h" */
 /* Amalgamated: #include "mg_internal.h" */
@@ -10689,10 +10631,6 @@ struct mg_str mg_url_encode(const struct mg_str src) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_mqtt.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_MQTT
 
@@ -10700,6 +10638,8 @@ struct mg_str mg_url_encode(const struct mg_str src) {
 
 /* Amalgamated: #include "mg_internal.h" */
 /* Amalgamated: #include "mg_mqtt.h" */
+
+#define MG_F_MQTT_PING_PENDING MG_F_PROTO_1
 
 static uint16_t getu16(const char *p) {
   const uint8_t *up = (const uint8_t *) p;
@@ -10714,8 +10654,8 @@ static const char *scanto(const char *p, struct mg_str *s) {
 
 MG_INTERNAL int parse_mqtt(struct mbuf *io, struct mg_mqtt_message *mm) {
   uint8_t header;
-  size_t len = 0, len_len = 0;
-  const char *p, *end;
+  uint32_t len, len_len; /* must be 32-bit, see #1055 */
+  const char *p, *end, *eop = &io->buf[io->len];
   unsigned char lc = 0;
   int cmd;
 
@@ -10726,18 +10666,16 @@ MG_INTERNAL int parse_mqtt(struct mbuf *io, struct mg_mqtt_message *mm) {
   /* decode mqtt variable length */
   len = len_len = 0;
   p = io->buf + 1;
-  while ((size_t)(p - io->buf) < io->len) {
+  while (p < eop) {
     lc = *((const unsigned char *) p++);
     len += (lc & 0x7f) << 7 * len_len;
     len_len++;
     if (!(lc & 0x80)) break;
-    if (len_len > 4) return MG_MQTT_ERROR_MALFORMED_MSG;
+    if (len_len > sizeof(len)) return MG_MQTT_ERROR_MALFORMED_MSG;
   }
 
   end = p + len;
-  if (lc & 0x80 || len > (io->len - (p - io->buf))) {
-    return MG_MQTT_ERROR_INCOMPLETE_MSG;
-  }
+  if (lc & 0x80 || end > eop) return MG_MQTT_ERROR_INCOMPLETE_MSG;
 
   mm->cmd = cmd;
   mm->qos = MG_MQTT_GET_QOS(header);
@@ -10791,7 +10729,9 @@ MG_INTERNAL int parse_mqtt(struct mbuf *io, struct mg_mqtt_message *mm) {
     case MG_MQTT_CMD_PUBREL:
     case MG_MQTT_CMD_PUBCOMP:
     case MG_MQTT_CMD_SUBACK:
+      if (end - p < 2) return MG_MQTT_ERROR_MALFORMED_MSG;
       mm->message_id = getu16(p);
+      p += 2;
       break;
     case MG_MQTT_CMD_PUBLISH: {
       p = scanto(p, &mm->topic);
@@ -10863,6 +10803,10 @@ static void mqtt_handler(struct mg_connection *nc, int ev,
           }
           break;
         }
+        if (mm.cmd == MG_MQTT_CMD_PINGRESP) {
+          LOG(LL_DEBUG, ("Recv PINGRESP"));
+          nc->flags &= ~MG_F_MQTT_PING_PENDING;
+        }
 
         nc->handler(nc, MG_MQTT_EVENT_BASE + mm.cmd, &mm MG_UD_ARG(user_data));
         mbuf_remove(io, len);
@@ -10873,10 +10817,26 @@ static void mqtt_handler(struct mg_connection *nc, int ev,
       struct mg_mqtt_proto_data *pd =
           (struct mg_mqtt_proto_data *) nc->proto_data;
       double now = mg_time();
-      if (pd->keep_alive > 0 && pd->last_control_time > 0 &&
-          (now - pd->last_control_time) > pd->keep_alive) {
-        LOG(LL_DEBUG, ("Send PINGREQ"));
-        mg_mqtt_ping(nc);
+      if (pd->keep_alive > 0 && pd->last_control_time > 0) {
+        double diff = (now - pd->last_control_time);
+        if (diff > pd->keep_alive) {
+          if (diff < 1500000000) {
+            if (!(nc->flags & MG_F_MQTT_PING_PENDING)) {
+              LOG(LL_DEBUG, ("Send PINGREQ"));
+              nc->flags |= MG_F_MQTT_PING_PENDING;
+              mg_mqtt_ping(nc);
+            } else {
+              LOG(LL_DEBUG, ("Ping timeout"));
+              nc->flags |= MG_F_CLOSE_IMMEDIATELY;
+            }
+          } else {
+            /* Wall time has just been set. Avoid immediate ping,
+             * more likely than not it is not needed. The standard allows for
+             * 1.5X interval for ping requests, so even if were just about to
+             * send one, we should be ok waiting 0.4X more. */
+            pd->last_control_time = now - pd->keep_alive * 0.6;
+          }
+        }
       }
       break;
     }
@@ -10887,26 +10847,44 @@ static void mg_mqtt_proto_data_destructor(void *proto_data) {
   MG_FREE(proto_data);
 }
 
+static struct mg_str mg_mqtt_next_topic_component(struct mg_str *topic) {
+  struct mg_str res = *topic;
+  const char *c = mg_strchr(*topic, '/');
+  if (c != NULL) {
+    res.len = (c - topic->p);
+    topic->len -= (res.len + 1);
+    topic->p += (res.len + 1);
+  } else {
+    topic->len = 0;
+  }
+  return res;
+}
+
+/* Refernce: https://mosquitto.org/man/mqtt-7.html */
 int mg_mqtt_match_topic_expression(struct mg_str exp, struct mg_str topic) {
-  /* TODO(mkm): implement real matching */
-  if (memchr(exp.p, '#', exp.len)) {
-    /* exp `foo/#` will become `foo/` */
-    exp.len -= 1;
-    /*
-     * topic should be longer than the expression: e.g. topic `foo/bar` does
-     * match `foo/#`, but neither `foo` nor `foo/` do.
-     */
-    if (topic.len <= exp.len) {
+  struct mg_str ec, tc;
+  if (exp.len == 0) return 0;
+  while (1) {
+    ec = mg_mqtt_next_topic_component(&exp);
+    tc = mg_mqtt_next_topic_component(&topic);
+    if (ec.len == 0) {
+      if (tc.len != 0) return 0;
+      if (exp.len == 0) break;
+      continue;
+    }
+    if (mg_vcmp(&ec, "+") == 0) {
+      if (tc.len == 0 && topic.len == 0) return 0;
+      continue;
+    }
+    if (mg_vcmp(&ec, "#") == 0) {
+      /* Must be the last component in the expression or it's invalid. */
+      return (exp.len == 0);
+    }
+    if (mg_strcmp(ec, tc) != 0) {
       return 0;
     }
-
-    /* Truncate topic so that it'll pass the next length check */
-    topic.len = exp.len;
   }
-  if (topic.len != exp.len) {
-    return 0;
-  }
-  return strncmp(topic.p, exp.p, exp.len) == 0;
+  return (tc.len == 0 && topic.len == 0);
 }
 
 int mg_mqtt_vmatch_topic_expression(const char *exp, struct mg_str topic) {
@@ -11185,10 +11163,6 @@ void mg_mqtt_disconnect(struct mg_connection *nc) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_mqtt_server.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 /* Amalgamated: #include "mg_internal.h" */
 /* Amalgamated: #include "mg_mqtt_server.h" */
@@ -11382,10 +11356,6 @@ struct mg_mqtt_session *mg_mqtt_next(struct mg_mqtt_broker *brk,
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_dns.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_DNS
 
@@ -11469,33 +11439,37 @@ int mg_dns_copy_questions(struct mbuf *io, struct mg_dns_message *msg) {
   return mbuf_append(io, begin, end - begin);
 }
 
-int mg_dns_encode_name(struct mbuf *io, const char *name, size_t len) {
+int mg_dns_encode_name_s(struct mbuf *io, struct mg_str name) {
   const char *s;
   unsigned char n;
   size_t pos = io->len;
 
   do {
-    if ((s = strchr(name, '.')) == NULL) {
-      s = name + len;
+    if ((s = mg_strchr(name, '.')) == NULL) {
+      s = name.p + name.len;
     }
 
-    if (s - name > 127) {
+    if (s - name.p > 127) {
       return -1; /* TODO(mkm) cover */
     }
-    n = s - name;           /* chunk length */
+    n = s - name.p;         /* chunk length */
     mbuf_append(io, &n, 1); /* send length */
-    mbuf_append(io, name, n);
+    mbuf_append(io, name.p, n);
 
-    if (*s == '.') {
+    if (n < name.len && *s == '.') {
       n++;
     }
 
-    name += n;
-    len -= n;
-  } while (*s != '\0');
+    name.p += n;
+    name.len -= n;
+  } while (name.len > 0);
   mbuf_append(io, "\0", 1); /* Mark end of host name */
 
   return io->len - pos;
+}
+
+int mg_dns_encode_name(struct mbuf *io, const char *name, size_t len) {
+  return mg_dns_encode_name_s(io, mg_mk_str_n(name, len));
 }
 
 int mg_dns_encode_record(struct mbuf *io, struct mg_dns_resource_record *rr,
@@ -11762,10 +11736,6 @@ void mg_set_protocol_dns(struct mg_connection *nc) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_dns_server.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_DNS_SERVER
 
@@ -11836,10 +11806,6 @@ int mg_dns_reply_record(struct mg_dns_reply *reply,
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_resolv.c"
 #endif
-/*
- * Copyright (c) 2014 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_ASYNC_RESOLVER
 
@@ -12131,22 +12097,6 @@ void mg_set_nameserver(struct mg_mgr *mgr, const char *nameserver) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_coap.c"
 #endif
-/*
- * Copyright (c) 2015 Cesanta Software Limited
- * All rights reserved
- * This software is dual-licensed: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation. For the terms of this
- * license, see <http://www.gnu.org/licenses/>.
- *
- * You are free to use this software under the terms of the GNU General
- * Public License, but WITHOUT ANY WARRANTY; without even the implied
- * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See the GNU General Public License for more details.
- *
- * Alternatively, you can license this software under a commercial
- * license, as set out in <https://www.cesanta.com/license>.
- */
 
 /* Amalgamated: #include "mg_internal.h" */
 /* Amalgamated: #include "mg_coap.h" */
@@ -12731,10 +12681,6 @@ int mg_set_protocol_coap(struct mg_connection *nc) {
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_sntp.c"
 #endif
-/*
- * Copyright (c) 2016 Cesanta Software Limited
- * All rights reserved
- */
 
 /* Amalgamated: #include "mg_internal.h" */
 /* Amalgamated: #include "mg_sntp.h" */
@@ -13022,10 +12968,6 @@ struct mg_connection *mg_sntp_get_time(struct mg_mgr *mgr,
 #ifdef MG_MODULE_LINES
 #line 1 "mongoose/src/mg_socks.c"
 #endif
-/*
- * Copyright (c) 2017 Cesanta Software Limited
- * All rights reserved
- */
 
 #if MG_ENABLE_SOCKS
 
@@ -13184,22 +13126,6 @@ void mg_set_protocol_socks(struct mg_connection *c) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/cc3200/cc3200_libc.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #if CS_PLATFORM == CS_P_CC3200
 
@@ -13302,22 +13228,6 @@ int _isatty(int fd) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/msp432/msp432_libc.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #if CS_PLATFORM == CS_P_MSP432
 
@@ -13335,22 +13245,6 @@ int gettimeofday(struct timeval *tp, void *tzp) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/nrf5/nrf5_libc.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #if (CS_PLATFORM == CS_P_NRF51 || CS_PLATFORM == CS_P_NRF52) && \
     defined(__ARMCC_VERSION)
@@ -13364,22 +13258,6 @@ int gettimeofday(struct timeval *tp, void *tzp) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/simplelink/sl_fs_slfs.h"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef CS_COMMON_PLATFORMS_SIMPLELINK_SL_FS_SLFS_H_
 #define CS_COMMON_PLATFORMS_SIMPLELINK_SL_FS_SLFS_H_
@@ -13405,7 +13283,9 @@ off_t fs_slfs_lseek(int fd, off_t offset, int whence);
 int fs_slfs_unlink(const char *filename);
 int fs_slfs_rename(const char *from, const char *to);
 
-void fs_slfs_set_new_file_size(const char *name, size_t size);
+void fs_slfs_set_file_size(const char *name, size_t size);
+void fs_slfs_set_file_flags(const char *name, uint32_t flags, uint32_t *token);
+void fs_slfs_unset_file_flags(const char *name);
 
 #endif /* defined(MG_FS_SLFS) */
 
@@ -13413,22 +13293,6 @@ void fs_slfs_set_new_file_size(const char *name, size_t size);
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/simplelink/sl_fs_slfs.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 /* Standard libc interface to TI SimpleLink FS. */
 
@@ -13446,14 +13310,14 @@ void fs_slfs_set_new_file_size(const char *name, size_t size);
 /* Amalgamated: #include "common/mg_mem.h" */
 
 #if SL_MAJOR_VERSION_NUM < 2
-int slfs_open(const unsigned char *fname, uint32_t flags) {
+int slfs_open(const unsigned char *fname, uint32_t flags, uint32_t *token) {
   _i32 fh;
-  _i32 r = sl_FsOpen(fname, flags, NULL /* token */, &fh);
+  _i32 r = sl_FsOpen(fname, flags, (unsigned long *) token, &fh);
   return (r < 0 ? r : fh);
 }
 #else /* SL_MAJOR_VERSION_NUM >= 2 */
-int slfs_open(const unsigned char *fname, uint32_t flags) {
-  return sl_FsOpen(fname, flags, NULL /* token */);
+int slfs_open(const unsigned char *fname, uint32_t flags, uint32_t *token) {
+  return sl_FsOpen(fname, flags, (unsigned long *) token);
 }
 #endif
 
@@ -13469,9 +13333,11 @@ const char *drop_dir(const char *fname, bool *is_slfs);
 #define FS_SLFS_MAX_FILE_SIZE (64 * 1024)
 #endif
 
-struct sl_file_size_hint {
+struct sl_file_open_info {
   char *name;
   size_t size;
+  uint32_t flags;
+  uint32_t *token;
 };
 
 struct sl_fd_info {
@@ -13481,7 +13347,10 @@ struct sl_fd_info {
 };
 
 static struct sl_fd_info s_sl_fds[MAX_OPEN_SLFS_FILES];
-static struct sl_file_size_hint s_sl_file_size_hints[MAX_OPEN_SLFS_FILES];
+static struct sl_file_open_info s_sl_file_open_infos[MAX_OPEN_SLFS_FILES];
+
+static struct sl_file_open_info *fs_slfs_find_foi(const char *name,
+                                                  bool create);
 
 static int sl_fs_to_errno(_i32 r) {
   DBG(("SL error: %d", (int) r));
@@ -13522,7 +13391,13 @@ int fs_slfs_open(const char *pathname, int flags, mode_t mode) {
   _u32 am = 0;
   fi->size = (size_t) -1;
   int rw = (flags & 3);
-  size_t new_size = FS_SLFS_MAX_FILE_SIZE;
+  size_t new_size = 0;
+  struct sl_file_open_info *foi =
+      fs_slfs_find_foi(pathname, false /* create */);
+  if (foi != NULL) {
+    LOG(LL_DEBUG, ("FOI for %s: %d 0x%x %p", pathname, (int) foi->size,
+                   (unsigned int) foi->flags, foi->token));
+  }
   if (rw == O_RDONLY) {
     SlFsFileInfo_t sl_fi;
     _i32 r = sl_FsGetInfo((const _u8 *) pathname, 0, &sl_fi);
@@ -13537,24 +13412,27 @@ int fs_slfs_open(const char *pathname, int flags, mode_t mode) {
       return set_errno(ENOTSUP);
     }
     if (flags & O_CREAT) {
-      size_t i;
-      for (i = 0; i < MAX_OPEN_SLFS_FILES; i++) {
-        if (s_sl_file_size_hints[i].name != NULL &&
-            strcmp(s_sl_file_size_hints[i].name, pathname) == 0) {
-          new_size = s_sl_file_size_hints[i].size;
-          MG_FREE(s_sl_file_size_hints[i].name);
-          s_sl_file_size_hints[i].name = NULL;
-          break;
-        }
+      if (foi->size > 0) {
+        new_size = foi->size;
+      } else {
+        new_size = FS_SLFS_MAX_FILE_SIZE;
       }
       am = FS_MODE_OPEN_CREATE(new_size, 0);
     } else {
       am = SL_FS_WRITE;
     }
+#if SL_MAJOR_VERSION_NUM >= 2
+    am |= SL_FS_OVERWRITE;
+#endif
   }
-  fi->fh = slfs_open((_u8 *) pathname, am);
-  LOG(LL_DEBUG, ("sl_FsOpen(%s, 0x%x) sz %u = %d", pathname, (int) am,
-                 (unsigned int) new_size, (int) fi->fh));
+  uint32_t *token = NULL;
+  if (foi != NULL) {
+    am |= foi->flags;
+    token = foi->token;
+  }
+  fi->fh = slfs_open((_u8 *) pathname, am, token);
+  LOG(LL_DEBUG, ("sl_FsOpen(%s, 0x%x, %p) sz %u = %d", pathname, (int) am,
+                 token, (unsigned int) new_size, (int) fi->fh));
   int r;
   if (fi->fh >= 0) {
     fi->pos = 0;
@@ -13658,38 +13536,52 @@ int fs_slfs_rename(const char *from, const char *to) {
   return set_errno(ENOTSUP);
 }
 
-void fs_slfs_set_new_file_size(const char *name, size_t size) {
-  int i;
+static struct sl_file_open_info *fs_slfs_find_foi(const char *name,
+                                                  bool create) {
+  int i = 0;
   for (i = 0; i < MAX_OPEN_SLFS_FILES; i++) {
-    if (s_sl_file_size_hints[i].name == NULL) {
-      DBG(("File size hint: %s %d", name, (int) size));
-      s_sl_file_size_hints[i].name = strdup(name);
-      s_sl_file_size_hints[i].size = size;
+    if (s_sl_file_open_infos[i].name != NULL &&
+        strcmp(drop_dir(s_sl_file_open_infos[i].name, NULL), name) == 0) {
       break;
     }
   }
+  if (i != MAX_OPEN_SLFS_FILES) return &s_sl_file_open_infos[i];
+  if (!create) return NULL;
+  for (i = 0; i < MAX_OPEN_SLFS_FILES; i++) {
+    if (s_sl_file_open_infos[i].name == NULL) break;
+  }
+  if (i == MAX_OPEN_SLFS_FILES) {
+    i = 0; /* Evict a random slot. */
+  }
+  if (s_sl_file_open_infos[i].name != NULL) {
+    free(s_sl_file_open_infos[i].name);
+  }
+  s_sl_file_open_infos[i].name = strdup(name);
+  return &s_sl_file_open_infos[i];
+}
+
+void fs_slfs_set_file_size(const char *name, size_t size) {
+  struct sl_file_open_info *foi = fs_slfs_find_foi(name, true /* create */);
+  foi->size = size;
+}
+
+void fs_slfs_set_file_flags(const char *name, uint32_t flags, uint32_t *token) {
+  struct sl_file_open_info *foi = fs_slfs_find_foi(name, true /* create */);
+  foi->flags = flags;
+  foi->token = token;
+}
+
+void fs_slfs_unset_file_flags(const char *name) {
+  struct sl_file_open_info *foi = fs_slfs_find_foi(name, false /* create */);
+  if (foi == NULL) return;
+  free(foi->name);
+  memset(foi, 0, sizeof(*foi));
 }
 
 #endif /* defined(MG_FS_SLFS) || defined(CC3200_FS_SLFS) */
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/simplelink/sl_fs.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #if MG_NET_IF == MG_NET_IF_SIMPLELINK && \
     (defined(MG_FS_SLFS) || defined(MG_FS_SPIFFS))
@@ -14100,22 +13992,6 @@ int sl_fs_init(void) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/simplelink/sl_socket.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #if MG_NET_IF == MG_NET_IF_SIMPLELINK
 
@@ -14218,22 +14094,6 @@ void mg_run_in_task(void (*cb)(struct mg_mgr *mgr, void *arg), void *cb_arg) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/simplelink/sl_net_if.h"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef CS_COMMON_PLATFORMS_SIMPLELINK_SL_NET_IF_H_
 #define CS_COMMON_PLATFORMS_SIMPLELINK_SL_NET_IF_H_
@@ -14258,22 +14118,6 @@ extern const struct mg_iface_vtable mg_simplelink_iface_vtable;
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/simplelink/sl_net_if.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 /* Amalgamated: #include "common/platforms/simplelink/sl_net_if.h" */
 
@@ -14693,22 +14537,6 @@ const struct mg_iface_vtable mg_default_iface_vtable = MG_SL_IFACE_VTABLE;
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/simplelink/sl_ssl_if.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #if MG_ENABLE_SSL && MG_SSL_IF == MG_SSL_IF_SIMPLELINK
 
@@ -14810,9 +14638,9 @@ bool pem_to_der(const char *pem_file, const char *der_file) {
   pf = fopen(pem_file, "r");
   if (pf == NULL) goto clean;
   remove(der_file);
-  fs_slfs_set_new_file_size(der_file + MG_SSL_IF_SIMPLELINK_SLFS_PREFIX_LEN,
-                            2048);
+  fs_slfs_set_file_size(der_file + MG_SSL_IF_SIMPLELINK_SLFS_PREFIX_LEN, 2048);
   df = fopen(der_file, "w");
+  fs_slfs_unset_file_flags(der_file + MG_SSL_IF_SIMPLELINK_SLFS_PREFIX_LEN);
   if (df == NULL) goto clean;
   while (1) {
     char pem_buf[70];
@@ -14947,22 +14775,6 @@ int sl_set_ssl_opts(int sock, struct mg_connection *nc) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/lwip/mg_lwip_net_if.h"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef CS_COMMON_PLATFORMS_LWIP_MG_NET_IF_LWIP_H_
 #define CS_COMMON_PLATFORMS_LWIP_MG_NET_IF_LWIP_H_
@@ -15015,22 +14827,6 @@ void mg_lwip_mgr_schedule_poll(struct mg_mgr *mgr);
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/lwip/mg_lwip_net_if.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #if MG_ENABLE_NET_IF_LWIP_LOW_LEVEL
 
@@ -15041,7 +14837,8 @@ void mg_lwip_mgr_schedule_poll(struct mg_mgr *mgr);
 #include <lwip/tcp.h>
 #include <lwip/tcpip.h>
 #if ((LWIP_VERSION_MAJOR << 8) | LWIP_VERSION_MINOR) >= 0x0105
-#include <lwip/priv/tcp_priv.h> /* For tcp_seg */
+#include <lwip/priv/tcp_priv.h>   /* For tcp_seg */
+#include <lwip/priv/tcpip_priv.h> /* For tcpip_api_call */
 #else
 #include <lwip/tcp_impl.h>
 #endif
@@ -15081,9 +14878,35 @@ void mg_lwip_mgr_schedule_poll(struct mg_mgr *mgr);
 #define SET_ADDR(dst, src) (dst)->sin.sin_addr.s_addr = ip_2_ip4(src)->addr
 #endif
 
-#if NO_SYS
-#define tcpip_callback(fn, arg) (fn)(arg)
-typedef void (*tcpip_callback_fn)(void *arg);
+#if !NO_SYS
+#if LWIP_TCPIP_CORE_LOCKING
+/* With locking tcpip_api_call is just a function call wrapped in lock/unlock,
+ * so we can get away with just casting. */
+void mg_lwip_netif_run_on_tcpip(void (*fn)(void *), void *arg) {
+  tcpip_api_call((tcpip_api_call_fn) fn, (struct tcpip_api_call_data *) arg);
+}
+#else
+static sys_sem_t s_tcpip_call_lock_sem = NULL;
+static sys_sem_t s_tcpip_call_sync_sem = NULL;
+struct mg_lwip_netif_tcpip_call_ctx {
+  void (*fn)(void *);
+  void *arg;
+};
+static void xxx_tcpip(void *arg) {
+  struct mg_lwip_netif_tcpip_call_ctx *ctx =
+      (struct mg_lwip_netif_tcpip_call_ctx *) arg;
+  ctx->fn(ctx->arg);
+  sys_sem_signal(&s_tcpip_call_sync_sem);
+}
+void mg_lwip_netif_run_on_tcpip(void (*fn)(void *), void *arg) {
+  struct mg_lwip_netif_tcpip_call_ctx ctx = {.fn = fn, .arg = arg};
+  sys_arch_sem_wait(&s_tcpip_call_lock_sem, 0);
+  tcpip_send_msg_wait_sem(xxx_tcpip, &ctx, &s_tcpip_call_sync_sem);
+  sys_sem_signal(&s_tcpip_call_lock_sem);
+}
+#endif
+#else
+#define mg_lwip_netif_run_on_tcpip(fn, arg) (fn)(arg)
 #endif
 
 void mg_lwip_if_init(struct mg_iface *iface);
@@ -15092,7 +14915,8 @@ void mg_lwip_if_add_conn(struct mg_connection *nc);
 void mg_lwip_if_remove_conn(struct mg_connection *nc);
 time_t mg_lwip_if_poll(struct mg_iface *iface, int timeout_ms);
 
-#if defined(RTOS_SDK) || defined(ESP_PLATFORM)
+// If compiling for Mongoose OS.
+#ifdef MGOS
 extern void mgos_lock();
 extern void mgos_unlock();
 #else
@@ -15261,7 +15085,7 @@ static void mg_lwip_if_connect_tcp_tcpip(void *arg) {
 void mg_lwip_if_connect_tcp(struct mg_connection *nc,
                             const union socket_address *sa) {
   struct mg_lwip_if_connect_tcp_ctx ctx = {.nc = nc, .sa = sa};
-  tcpip_callback(mg_lwip_if_connect_tcp_tcpip, &ctx);
+  mg_lwip_netif_run_on_tcpip(mg_lwip_if_connect_tcp_tcpip, &ctx);
 }
 
 /*
@@ -15354,7 +15178,7 @@ static void mg_lwip_if_connect_udp_tcpip(void *arg) {
 }
 
 void mg_lwip_if_connect_udp(struct mg_connection *nc) {
-  tcpip_callback(mg_lwip_if_connect_udp_tcpip, nc);
+  mg_lwip_netif_run_on_tcpip(mg_lwip_if_connect_udp_tcpip, nc);
 }
 
 static void tcp_close_tcpip(void *arg) {
@@ -15440,7 +15264,7 @@ static void mg_lwip_if_listen_tcp_tcpip(void *arg) {
 
 int mg_lwip_if_listen_tcp(struct mg_connection *nc, union socket_address *sa) {
   struct mg_lwip_if_listen_ctx ctx = {.nc = nc, .sa = sa};
-  tcpip_callback(mg_lwip_if_listen_tcp_tcpip, &ctx);
+  mg_lwip_netif_run_on_tcpip(mg_lwip_if_listen_tcp_tcpip, &ctx);
   return ctx.ret;
 }
 
@@ -15466,7 +15290,7 @@ static void mg_lwip_if_listen_udp_tcpip(void *arg) {
 
 int mg_lwip_if_listen_udp(struct mg_connection *nc, union socket_address *sa) {
   struct mg_lwip_if_listen_ctx ctx = {.nc = nc, .sa = sa};
-  tcpip_callback(mg_lwip_if_listen_udp_tcpip, &ctx);
+  mg_lwip_netif_run_on_tcpip(mg_lwip_if_listen_udp_tcpip, &ctx);
   return ctx.ret;
 }
 
@@ -15491,7 +15315,7 @@ static void mg_lwip_tcp_write_tcpip(void *arg) {
   if (len == 0) {
     DBG(("%p no buf avail %u %u %p %p", tpcb, tpcb->snd_buf, tpcb->snd_queuelen,
          tpcb->unsent, tpcb->unacked));
-    tcpip_callback(tcp_output_tcpip, tpcb);
+    mg_lwip_netif_run_on_tcpip(tcp_output_tcpip, tpcb);
     ctx->ret = 0;
     return;
   }
@@ -15534,7 +15358,7 @@ int mg_lwip_if_tcp_send(struct mg_connection *nc, const void *buf, size_t len) {
   struct tcp_pcb *tpcb = cs->pcb.tcp;
   if (tpcb == NULL) return -1;
   if (tpcb->snd_buf <= 0) return 0;
-  tcpip_callback(mg_lwip_tcp_write_tcpip, &ctx);
+  mg_lwip_netif_run_on_tcpip(mg_lwip_tcp_write_tcpip, &ctx);
   return ctx.ret;
 }
 
@@ -15566,7 +15390,7 @@ static int mg_lwip_if_udp_send(struct mg_connection *nc, const void *data,
   if (p == NULL) return 0;
   memcpy(p->payload, data, len);
   struct udp_sendto_ctx ctx = {.upcb = upcb, .p = p, .ip = &ip, .port = port};
-  tcpip_callback(udp_sendto_tcpip, &ctx);
+  mg_lwip_netif_run_on_tcpip(udp_sendto_tcpip, &ctx);
   cs->err = ctx.ret;
   pbuf_free(p);
   return (cs->err == ERR_OK ? (int) len : -2);
@@ -15598,7 +15422,7 @@ struct tcp_recved_ctx {
 
 void tcp_recved_tcpip(void *arg) {
   struct tcp_recved_ctx *ctx = (struct tcp_recved_ctx *) arg;
-  tcp_recved(ctx->tpcb, ctx->len);
+  if (ctx->tpcb != NULL) tcp_recved(ctx->tpcb, ctx->len);
 }
 
 static int mg_lwip_if_tcp_recv(struct mg_connection *nc, void *buf,
@@ -15627,7 +15451,7 @@ static int mg_lwip_if_tcp_recv(struct mg_connection *nc, void *buf,
   mgos_unlock();
   if (res > 0) {
     struct tcp_recved_ctx ctx = {.tpcb = cs->pcb.tcp, .len = res};
-    tcpip_callback(tcp_recved_tcpip, &ctx);
+    mg_lwip_netif_run_on_tcpip(tcp_recved_tcpip, &ctx);
   }
   return res;
 }
@@ -15654,7 +15478,7 @@ void mg_lwip_if_destroy_conn(struct mg_connection *nc) {
       tcp_arg(tpcb, NULL);
       DBG(("%p tcp_close %p", nc, tpcb));
       tcp_arg(tpcb, NULL);
-      tcpip_callback(tcp_close_tcpip, tpcb);
+      mg_lwip_netif_run_on_tcpip(tcp_close_tcpip, tpcb);
     }
     while (cs->rx_chain != NULL) {
       struct pbuf *seg = cs->rx_chain;
@@ -15668,7 +15492,7 @@ void mg_lwip_if_destroy_conn(struct mg_connection *nc) {
     struct udp_pcb *upcb = cs->pcb.udp;
     if (upcb != NULL) {
       DBG(("%p udp_remove %p", nc, upcb));
-      tcpip_callback(udp_remove_tcpip, upcb);
+      mg_lwip_netif_run_on_tcpip(udp_remove_tcpip, upcb);
     }
     memset(cs, 0, sizeof(*cs));
     MG_FREE(cs);
@@ -15736,22 +15560,6 @@ const struct mg_iface_vtable mg_default_iface_vtable = MG_LWIP_IFACE_VTABLE;
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/lwip/mg_lwip_ev_mgr.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #if MG_NET_IF == MG_NET_IF_LWIP_LOW_LEVEL
 
@@ -15805,7 +15613,6 @@ void mg_ev_mgr_lwip_process_signals(struct mg_mgr *mgr) {
         break;
       }
       case MG_SIG_CLOSE_CONN: {
-        nc->flags |= MG_F_SEND_AND_CLOSE;
         mg_close_conn(nc);
         break;
       }
@@ -15830,6 +15637,10 @@ void mg_lwip_if_init(struct mg_iface *iface) {
   LOG(LL_INFO, ("Mongoose %s, LwIP %u.%u.%u", MG_VERSION, LWIP_VERSION_MAJOR,
                 LWIP_VERSION_MINOR, LWIP_VERSION_REVISION));
   iface->data = MG_CALLOC(1, sizeof(struct mg_ev_mgr_lwip_data));
+#if !NO_SYS && !LWIP_TCPIP_CORE_LOCKING
+  sys_sem_new(&s_tcpip_call_lock_sem, 1);
+  sys_sem_new(&s_tcpip_call_sync_sem, 0);
+#endif
 }
 
 void mg_lwip_if_free(struct mg_iface *iface) {
@@ -15871,7 +15682,7 @@ time_t mg_lwip_if_poll(struct mg_iface *iface, int timeout_ms) {
     if (nc->sock != INVALID_SOCKET &&
         !(nc->flags & (MG_F_UDP | MG_F_LISTENING)) && cs->pcb.tcp != NULL &&
         cs->pcb.tcp->unsent != NULL) {
-      tcpip_callback(tcp_output_tcpip, cs->pcb.tcp);
+      mg_lwip_netif_run_on_tcpip(tcp_output_tcpip, cs->pcb.tcp);
     }
     if (nc->ev_timer_time > 0) {
       if (num_timers == 0 || nc->ev_timer_time < min_timer) {
@@ -15909,22 +15720,6 @@ time_t mg_lwip_if_poll(struct mg_iface *iface, int timeout_ms) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/wince/wince_libc.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifdef WINCE
 
@@ -15998,22 +15793,6 @@ static void mg_gmt_time_string(char *buf, size_t buf_len, time_t *t) {
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/pic32/pic32_net_if.h"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifndef CS_COMMON_PLATFORMS_PIC32_NET_IF_H_
 #define CS_COMMON_PLATFORMS_PIC32_NET_IF_H_
@@ -16038,22 +15817,6 @@ extern const struct mg_iface_vtable mg_pic32_iface_vtable;
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/pic32/pic32_net_if.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #if MG_ENABLE_NET_IF_PIC32
 
@@ -16345,22 +16108,6 @@ const struct mg_iface_vtable mg_default_iface_vtable = MG_PIC32_IFACE_VTABLE;
 #ifdef MG_MODULE_LINES
 #line 1 "common/platforms/windows/windows_direct.c"
 #endif
-/*
- * Copyright (c) 2014-2018 Cesanta Software Limited
- * All rights reserved
- *
- * Licensed under the Apache License, Version 2.0 (the ""License"");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an ""AS IS"" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #ifdef _WIN32
 

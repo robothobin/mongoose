@@ -15,12 +15,12 @@
  * license, as set out in <https://www.cesanta.com/license>.
  */
 
-#include "mongoose.h"
-#include "src/mg_internal.h"
 #include "unit_test.h"
+#include "common/cs_md5.h"
 #include "common/test_main.h"
 #include "common/test_util.h"
-#include "common/cs_md5.h"
+#include "mongoose.h"
+#include "src/mg_internal.h"
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ < 199901L && !defined(WIN32)
 #define __func__ ""
@@ -975,12 +975,6 @@ static void connect_fail_cb(struct mg_connection *nc, int ev, void *p) {
   }
 }
 
-static void ev_handler_empty(struct mg_connection *nc, int ev, void *p) {
-  (void) nc;
-  (void) ev;
-  (void) p;
-}
-
 static const char *test_connection_errors(void) {
   struct mg_mgr mgr;
   struct mg_bind_opts bopts;
@@ -995,25 +989,21 @@ static const char *test_connection_errors(void) {
   bopts.error_string = &error_string;
 
   ASSERT(mg_bind_opt(&mgr, "blah://12", NULL, bopts) == NULL);
-  ASSERT_STREQ(error_string, "handler is required");
-
-  ASSERT(mg_bind_opt(&mgr, "blah://12", ev_handler_empty, bopts) == NULL);
   ASSERT_STREQ(error_string, "cannot parse address");
 
-  ASSERT(mg_bind_opt(&mgr, "tcp://8.8.8.8:88", ev_handler_empty, bopts) ==
-         NULL);
+  ASSERT(mg_bind_opt(&mgr, "tcp://8.8.8.8:88", NULL, bopts) == NULL);
   ASSERT_STREQ(error_string, "failed to open listener");
 
 #if MG_ENABLE_SSL
   bopts.ssl_cert = S_PEM;
-  ASSERT(mg_bind_opt(&mgr, "udp://:0", ev_handler_empty, bopts) == NULL);
+  ASSERT(mg_bind_opt(&mgr, "udp://:0", NULL, bopts) == NULL);
   ASSERT_STREQ(error_string, "SSL for UDP is not supported");
   bopts.ssl_cert = "no_such_file";
-  ASSERT(mg_bind_opt(&mgr, "tcp://:0", ev_handler_empty, bopts) == NULL);
+  ASSERT(mg_bind_opt(&mgr, "tcp://:0", NULL, bopts) == NULL);
   ASSERT_STREQ(error_string, "Invalid SSL cert");
   bopts.ssl_cert = NULL;
   bopts.ssl_ca_cert = "no_such_file";
-  ASSERT(mg_bind_opt(&mgr, "tcp://:0", ev_handler_empty, bopts) == NULL);
+  ASSERT(mg_bind_opt(&mgr, "tcp://:0", NULL, bopts) == NULL);
   ASSERT_STREQ(error_string, "Invalid SSL CA cert");
 #endif
 
@@ -1710,7 +1700,7 @@ static void cb10(struct mg_connection *nc, int ev, void *ev_data) {
   }
 }
 
-static void endpoint_handler(struct mg_connection *nc, int ev, void *ev_data) {
+static void default_handler(struct mg_connection *nc, int ev, void *ev_data) {
   struct http_message *hm = (struct http_message *) ev_data;
   (void) ev_data;
 
@@ -1724,7 +1714,8 @@ static void endpoint_handler(struct mg_connection *nc, int ev, void *ev_data) {
     }
   } else if (ev == MG_EV_CLOSE) {
     if (nc->listener != NULL) {
-      (*(int *) nc->listener->user_data) += 100;
+      (*(int *) nc->listener->user_data) += 1;
+      DBG(("%p == default close", nc));
     }
   }
 }
@@ -1737,7 +1728,8 @@ static void handle_hello1(struct mg_connection *nc, int ev, void *ev_data) {
       nc->flags |= MG_F_SEND_AND_CLOSE;
       break;
     case MG_EV_CLOSE:
-      (*(int *) nc->listener->user_data)++;
+      DBG(("%p == hello1 close", nc));
+      (*(int *) nc->listener->user_data) += 10;
       break;
   }
 }
@@ -1750,7 +1742,8 @@ static void handle_hello2(struct mg_connection *nc, int ev, void *ev_data) {
       nc->flags |= MG_F_SEND_AND_CLOSE;
       break;
     case MG_EV_CLOSE:
-      (*(int *) nc->listener->user_data)++;
+      DBG(("%p == hello2 close", nc));
+      (*(int *) nc->listener->user_data) += 100;
       break;
   }
 }
@@ -1763,7 +1756,8 @@ static void handle_hello5(struct mg_connection *nc, int ev, void *ev_data) {
       nc->flags |= MG_F_SEND_AND_CLOSE;
       break;
     case MG_EV_CLOSE:
-      (*(int *) nc->listener->user_data)++;
+      DBG(("%p == hello5 close", nc));
+      (*(int *) nc->listener->user_data) += 1000;
       break;
   }
 }
@@ -1823,7 +1817,7 @@ static const char *test_http_endpoints(void) {
 
   mg_mgr_init(&mgr, NULL);
   /* mgr.hexdump_file = "-"; */
-  ASSERT((nc = mg_bind(&mgr, local_addr, endpoint_handler)) != NULL);
+  ASSERT((nc = mg_bind(&mgr, local_addr, default_handler)) != NULL);
   mg_register_http_endpoint(nc, "/hello1", handle_hello1 MG_UD_ARG(NULL));
   mg_register_http_endpoint(nc, "/hello1/hello2",
                             handle_hello2 MG_UD_ARG(NULL));
@@ -1888,7 +1882,7 @@ static const char *test_http_endpoints(void) {
   poll_until(&mgr, 1, c_str_ne, buf, (void *) "");
   ASSERT_STREQ(buf, "[I am Hello again] 37");
 
-  ASSERT_EQ(close_count, 700);
+  ASSERT_EQ(close_count, 1117);
 
   mg_mgr_free(&mgr);
 
@@ -1997,7 +1991,7 @@ static const char *test_http_serve_file_streaming(void) {
   ASSERT((nc = mg_connect(&mgr, local_addr, srv2)) != NULL);
   mg_set_protocol_http_websocket(nc);
   nc->user_data = &status;
-  mg_printf(nc, "GET / HTTP/1.1\r\n\r\n");
+  mg_printf(nc, "GET / HTTP/1.0\r\n\r\n");
   poll_until(&mgr, 30, c_int_ne, &status, (void *) 0);
   ASSERT_EQ(status, 1);
   mg_mgr_free(&mgr);
@@ -2011,7 +2005,8 @@ static const char *test_http(void) {
   char buf[50] = "", status[100] = "", mime1[20] = "", mime2[100] = "";
   char opt_buf[1024] = "";
   const char *opt_answer =
-      "HTTP/1.1 200 OK\r\nAllow: GET, POST, HEAD, CONNECT, OPTIONS, MKCOL, "
+      "HTTP/1.1 200 OK\r\nServer: Mongoose/" MG_VERSION
+      "\r\nAllow: GET, POST, HEAD, CONNECT, OPTIONS, MKCOL, "
       "PUT, DELETE, PROPFIND, MOVE";
   char url[1000];
 
@@ -2539,32 +2534,6 @@ static const char *test_http_range(void) {
   return NULL;
 }
 
-static void cb3(struct mg_connection *nc, int ev, void *ev_data) {
-  struct websocket_message *wm = (struct websocket_message *) ev_data;
-
-  if (ev == MG_EV_WEBSOCKET_FRAME) {
-    const char *reply = wm->size == 2 && !memcmp(wm->data, "hi", 2) ? "A" : "B";
-    mg_printf_websocket_frame(nc, WEBSOCKET_OP_TEXT, "%s", reply);
-  }
-}
-
-static void cb4(struct mg_connection *nc, int ev, void *ev_data) {
-  struct websocket_message *wm = (struct websocket_message *) ev_data;
-
-  if (ev == MG_EV_WEBSOCKET_FRAME) {
-    memcpy(nc->user_data, wm->data, wm->size);
-    mg_send_websocket_frame(nc, WEBSOCKET_OP_CLOSE, NULL, 0);
-  } else if (ev == MG_EV_WEBSOCKET_HANDSHAKE_DONE) {
-    /* Send "hi" to server. server must reply "A". */
-    struct mg_str h[2];
-    h[0].p = "h";
-    h[0].len = 1;
-    h[1].p = "i";
-    h[1].len = 1;
-    mg_send_websocket_framev(nc, WEBSOCKET_OP_TEXT, h, 2);
-  }
-}
-
 static void cb_ws_server(struct mg_connection *nc, int ev, void *ev_data) {
   struct websocket_message *wm = (struct websocket_message *) ev_data;
 
@@ -2779,6 +2748,38 @@ static const char *test_websocket(void) {
   return NULL;
 }
 
+static void cb3(struct mg_connection *nc, int ev, void *ev_data) {
+  struct websocket_message *wm = (struct websocket_message *) ev_data;
+  if (ev != MG_EV_WEBSOCKET_FRAME) return;
+  DBG(("server data '%.*s'", (int) wm->size, wm->data));
+  const char *reply = wm->size == 2 && !memcmp(wm->data, "hi", 2) ? "A" : "B";
+  mg_printf_websocket_frame(nc, WEBSOCKET_OP_TEXT, "%s", reply);
+}
+
+static void cb4(struct mg_connection *nc, int ev, void *ev_data) {
+  char *buf = (char *) nc->user_data;
+  if (ev == MG_EV_WEBSOCKET_FRAME) {
+    struct websocket_message *wm = (struct websocket_message *) ev_data;
+    DBG(("client data '%.*s'", (int) wm->size, wm->data));
+    memcpy(buf, wm->data, wm->size);
+    mg_send_websocket_frame(nc, WEBSOCKET_OP_CLOSE, NULL, 0);
+  } else if (ev == MG_EV_WEBSOCKET_HANDSHAKE_DONE) {
+    struct http_message *hm = (struct http_message *) ev_data;
+    DBG(("code %d", hm->resp_code));
+    if (hm->resp_code == 101) {
+      /* Send "hi" to server. server must reply "A". */
+      struct mg_str h[2];
+      h[0].p = "h";
+      h[0].len = 1;
+      h[1].p = "i";
+      h[1].len = 1;
+      mg_send_websocket_framev(nc, WEBSOCKET_OP_TEXT, h, 2);
+    } else {
+      snprintf(buf, 20, "code %d", hm->resp_code);
+    }
+  }
+}
+
 static void cbwep(struct mg_connection *c, int ev, void *ev_data) {
   struct websocket_message *wm = (struct websocket_message *) ev_data;
   char *buf = (char *) c->user_data;
@@ -2786,6 +2787,9 @@ static void cbwep(struct mg_connection *c, int ev, void *ev_data) {
   switch (ev) {
     case MG_EV_WEBSOCKET_HANDSHAKE_REQUEST:
       strcat(buf, "R");
+      if (buf[0] != '0') {
+        mg_http_send_error(c, 403, "I don't like you");
+      }
       break;
     case MG_EV_WEBSOCKET_HANDSHAKE_DONE:
       strcat(buf, "D");
@@ -2802,7 +2806,7 @@ static const char *test_websocket_endpoint(void) {
   struct mg_mgr mgr;
   struct mg_connection *nc;
   const char *local_addr = "127.0.0.1:7798";
-  char buf[20] = "", buf2[20] = "";
+  char buf[20] = "", buf2[20] = "0";
 
   mg_mgr_init(&mgr, NULL);
   /* mgr.hexdump_file = "-"; */
@@ -2817,10 +2821,21 @@ static const char *test_websocket_endpoint(void) {
   nc->user_data = buf;
   mg_send_websocket_handshake(nc, "/boo", NULL);
   poll_until(&mgr, 1, c_str_ne, buf, (void *) "");
-  mg_mgr_free(&mgr);
-
   /* Check that test buffer has been filled by the callback properly. */
-  ASSERT_STREQ(buf, "RDF|hi");
+  ASSERT_STREQ(buf, "0RDF|hi");
+
+  /* Test handshake failure */
+  ASSERT((nc = mg_connect(&mgr, local_addr, cb4)) != NULL);
+  mg_set_protocol_http_websocket(nc);
+  buf[0] = '\0';
+  buf2[0] = '1';
+  buf2[1] = '\0';
+  nc->user_data = buf;
+  mg_send_websocket_handshake(nc, "/boo", NULL);
+  poll_until(&mgr, 1, c_str_ne, buf, (void *) "");
+  ASSERT_STREQ(buf, "code 403");
+
+  mg_mgr_free(&mgr);
 
   return NULL;
 }
@@ -3379,15 +3394,36 @@ static const char *test_mqtt_parse_mqtt_qos1(void) {
 }
 
 static const char *test_mqtt_match_topic_expression(void) {
-  ASSERT_EQ(mg_mqtt_vmatch_topic_expression("foo", mg_mk_str("foo")), 1);
-  ASSERT_EQ(mg_mqtt_vmatch_topic_expression("foo", mg_mk_str("foo/")), 0);
-  ASSERT_EQ(mg_mqtt_vmatch_topic_expression("foo", mg_mk_str("foo/bar")), 0);
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo", mg_mk_str("foo")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("/foo", mg_mk_str("/foo")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("+/foo", mg_mk_str("/foo")));
+  ASSERT(!mg_mqtt_vmatch_topic_expression("foo", mg_mk_str("foobar")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo", mg_mk_str("foo/")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo", mg_mk_str("foo//")));
+  ASSERT(!mg_mqtt_vmatch_topic_expression("foo", mg_mk_str("foo/bar")));
+  ASSERT(!mg_mqtt_vmatch_topic_expression("foo", mg_mk_str("foo/+")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo/bar", mg_mk_str("foo/bar")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo/+", mg_mk_str("foo/bar")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("+/bar", mg_mk_str("foo/bar")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("+/+", mg_mk_str("foo/bar")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo/+/bar", mg_mk_str("foo//bar")));
+  ASSERT(!mg_mqtt_vmatch_topic_expression("foo/+/+", mg_mk_str("foo/bar")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo/+/#", mg_mk_str("foo/bar")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("+/foo/bar", mg_mk_str("/foo/bar")));
 
-  ASSERT_EQ(mg_mqtt_vmatch_topic_expression("foo/#", mg_mk_str("foo")), 0);
-  ASSERT_EQ(mg_mqtt_vmatch_topic_expression("foo/#", mg_mk_str("foo/")), 0);
-  ASSERT_EQ(mg_mqtt_vmatch_topic_expression("foo/#", mg_mk_str("foo/bar")), 1);
-  ASSERT_EQ(mg_mqtt_vmatch_topic_expression("foo/#", mg_mk_str("foo/bar/baz")),
-            1);
+  ASSERT(!mg_mqtt_vmatch_topic_expression("", mg_mk_str("")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("/", mg_mk_str("")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("/", mg_mk_str("/")));
+
+  ASSERT(mg_mqtt_vmatch_topic_expression("#", mg_mk_str("")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("#", mg_mk_str("foo")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("#", mg_mk_str("foo/bar")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo/#", mg_mk_str("foo")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo/#", mg_mk_str("foo/")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo/#", mg_mk_str("foo/bar")));
+  ASSERT(mg_mqtt_vmatch_topic_expression("foo/#", mg_mk_str("foo/bar/baz")));
+  ASSERT(!mg_mqtt_vmatch_topic_expression("#/foo", mg_mk_str("foo")));
+  ASSERT(!mg_mqtt_vmatch_topic_expression("#/foo", mg_mk_str("bar/foo")));
 
   return NULL;
 }
@@ -3961,6 +3997,7 @@ static const char *test_http_chunk2(void) {
   nc.mgr = &mgr;
   nc.sock = INVALID_SOCKET;
   nc.handler = eh_chunk2;
+  mg_http_create_proto_data(&nc);
   hm.message.len = hm.body.len = ~0;
 
   s_handle_chunk_event = 0;
@@ -4093,12 +4130,6 @@ static void cb_mp_send_one_byte(struct mg_connection *nc, int ev, void *p) {
   }
 }
 
-static void cb_mp_empty(struct mg_connection *nc, int ev, void *p) {
-  (void) nc;
-  (void) ev;
-  (void) p;
-}
-
 static const char b1[] =
     "111111111111111111111111111111111111111111111111111111111111111\r\n"
     "111111111111111111111111111111111111111111111111111111111111111\r\n"
@@ -4222,13 +4253,13 @@ static const char *test_http_multipart2(void) {
            "\r\n--Asrf456BGe4h\r\n", b1, b2, b4);
 
   /* Testing delivering to endpoint handler*/
-  nc_listen = mg_bind(&mgr, "8766", cb_mp_empty);
+  nc_listen = mg_bind(&mgr, "8766", NULL);
   nc_listen->user_data = &mpd;
 
   mg_set_protocol_http_websocket(nc_listen);
   mg_register_http_endpoint(nc_listen, "/test", cb_mp_srv MG_UD_ARG(NULL));
 
-  ASSERT((c = mg_connect_http(&mgr, cb_mp_empty, "http://127.0.0.1:8766/test",
+  ASSERT((c = mg_connect_http(&mgr, NULL, "http://127.0.0.1:8766/test",
                               "Connection: keep-alive\r\nContent-Type: "
                               "multipart/form-data; boundary=Asrf456BGe4h",
                               multi_part_req)) != NULL);
@@ -4265,7 +4296,7 @@ static const char *test_http_multipart2(void) {
   /* Test interrupted request */
   multi_part_req[1800] = '\0';
   c = mg_connect_http(
-      &mgr, cb_mp_empty, "http://127.0.0.1:8765",
+      &mgr, NULL, "http://127.0.0.1:8765",
       "Content-Type: multipart/form-data; boundary=Asrf456BGe4h",
       multi_part_req);
 
@@ -4286,7 +4317,7 @@ static const char *test_http_multipart2(void) {
 
   ASSERT(
       mg_connect_http(
-          &mgr, cb_mp_empty, "http://127.0.0.1:8766/test",
+          &mgr, NULL, "http://127.0.0.1:8766/test",
           "Content-Type: multipart/form-data; boundary=Asrf456BGe4h",
           "\r\n--Asrf456BGe4h\r\n"
           "Content-Disposition: form-data; name=\"d\"; filename=\"small\"\r\n"
@@ -4306,7 +4337,7 @@ static const char *test_http_multipart2(void) {
    * See https://github.com/cesanta/dev/issues/6974
    * This request should not lead to crash
    */
-  c = mg_connect(&mgr, "127.0.0.1:8766", cb_mp_empty);
+  c = mg_connect(&mgr, "127.0.0.1:8766", NULL);
   mg_printf(c,
             "POST /test HTTP/1.1\r\n"
             "Connection: keep-alive\r\n"
@@ -4359,7 +4390,7 @@ static const char *test_http_multipart_pipeline(void) {
   snprintf(multi_part_req, sizeof(multi_part_req), multi_part_req_fmt,
            "\r\n--Asrf456BGe4h\r\n", b1, b2, b4);
 
-  ASSERT((c = mg_connect_http(&mgr, cb_mp_empty, "http://127.0.0.1:8765/test",
+  ASSERT((c = mg_connect_http(&mgr, NULL, "http://127.0.0.1:8765/test",
                               "Content-Type: "
                               "multipart/form-data;boundary=Asrf456BGe4h\r\n"
                               "Connection: keep-alive",
@@ -4556,6 +4587,15 @@ static const char *test_dns_encode(void) {
 
     mbuf_free(&nc.send_mbuf);
   }
+  return NULL;
+}
+
+static const char *test_dns_encode_name(void) {
+  struct mbuf mb;
+  mbuf_init(&mb, 0);
+  ASSERT_EQ(mg_dns_encode_name(&mb, "www.cesanta.com.net.org", 15), 17);
+  ASSERT_STREQ_NZ(mb.buf, "\x03" "www" "\x07" "cesanta" "\x03" "com");
+  mbuf_free(&mb);
   return NULL;
 }
 
@@ -5643,7 +5683,7 @@ static const char *test_socks(void) {
   mg_set_protocol_http_websocket(c);
 
   /* Start socks proxy */
-  ASSERT((c = mg_bind(&mgr, proxy_addr, ev_handler_empty)) != NULL);
+  ASSERT((c = mg_bind(&mgr, proxy_addr, NULL)) != NULL);
   mg_set_protocol_socks(c);
 
   /* Create HTTP client that uses socks proxy */
@@ -5665,7 +5705,7 @@ static const char *test_socks(void) {
   mbuf_resize(&c->recv_mbuf, 10000000);
 
   /* Run event loop. Use more cycles to let file download complete. */
-  poll_until(&mgr, 10, c_str_ne, status, (void *) "");
+  poll_until(&mgr, 15, c_str_ne, status, (void *) "");
   ASSERT_STREQ(status, "success");
 
   mg_mgr_free(&mgr);
@@ -5750,6 +5790,7 @@ const char *tests_run(const char *filter) {
   RUN_TEST(test_mqtt_broker);
 #endif
   RUN_TEST(test_dns_encode);
+  RUN_TEST(test_dns_encode_name);
   RUN_TEST(test_dns_uncompress);
   RUN_TEST(test_dns_decode);
   RUN_TEST(test_dns_decode_truncated);

@@ -10,6 +10,8 @@
 #include "mg_internal.h"
 #include "mg_mqtt.h"
 
+#define MG_F_MQTT_PING_PENDING MG_F_PROTO_1
+
 static uint16_t getu16(const char *p) {
   const uint8_t *up = (const uint8_t *) p;
   return (up[0] << 8) + up[1];
@@ -23,8 +25,8 @@ static const char *scanto(const char *p, struct mg_str *s) {
 
 MG_INTERNAL int parse_mqtt(struct mbuf *io, struct mg_mqtt_message *mm) {
   uint8_t header;
-  size_t len = 0, len_len = 0;
-  const char *p, *end;
+  uint32_t len, len_len; /* must be 32-bit, see #1055 */
+  const char *p, *end, *eop = &io->buf[io->len];
   unsigned char lc = 0;
   int cmd;
 
@@ -35,18 +37,16 @@ MG_INTERNAL int parse_mqtt(struct mbuf *io, struct mg_mqtt_message *mm) {
   /* decode mqtt variable length */
   len = len_len = 0;
   p = io->buf + 1;
-  while ((size_t)(p - io->buf) < io->len) {
+  while (p < eop) {
     lc = *((const unsigned char *) p++);
     len += (lc & 0x7f) << 7 * len_len;
     len_len++;
     if (!(lc & 0x80)) break;
-    if (len_len > 4) return MG_MQTT_ERROR_MALFORMED_MSG;
+    if (len_len > sizeof(len)) return MG_MQTT_ERROR_MALFORMED_MSG;
   }
 
   end = p + len;
-  if (lc & 0x80 || len > (io->len - (p - io->buf))) {
-    return MG_MQTT_ERROR_INCOMPLETE_MSG;
-  }
+  if (lc & 0x80 || end > eop) return MG_MQTT_ERROR_INCOMPLETE_MSG;
 
   mm->cmd = cmd;
   mm->qos = MG_MQTT_GET_QOS(header);
@@ -100,7 +100,9 @@ MG_INTERNAL int parse_mqtt(struct mbuf *io, struct mg_mqtt_message *mm) {
     case MG_MQTT_CMD_PUBREL:
     case MG_MQTT_CMD_PUBCOMP:
     case MG_MQTT_CMD_SUBACK:
+      if (end - p < 2) return MG_MQTT_ERROR_MALFORMED_MSG;
       mm->message_id = getu16(p);
+      p += 2;
       break;
     case MG_MQTT_CMD_PUBLISH: {
       p = scanto(p, &mm->topic);
@@ -172,6 +174,10 @@ static void mqtt_handler(struct mg_connection *nc, int ev,
           }
           break;
         }
+        if (mm.cmd == MG_MQTT_CMD_PINGRESP) {
+          LOG(LL_DEBUG, ("Recv PINGRESP"));
+          nc->flags &= ~MG_F_MQTT_PING_PENDING;
+        }
 
         nc->handler(nc, MG_MQTT_EVENT_BASE + mm.cmd, &mm MG_UD_ARG(user_data));
         mbuf_remove(io, len);
@@ -182,10 +188,26 @@ static void mqtt_handler(struct mg_connection *nc, int ev,
       struct mg_mqtt_proto_data *pd =
           (struct mg_mqtt_proto_data *) nc->proto_data;
       double now = mg_time();
-      if (pd->keep_alive > 0 && pd->last_control_time > 0 &&
-          (now - pd->last_control_time) > pd->keep_alive) {
-        LOG(LL_DEBUG, ("Send PINGREQ"));
-        mg_mqtt_ping(nc);
+      if (pd->keep_alive > 0 && pd->last_control_time > 0) {
+        double diff = (now - pd->last_control_time);
+        if (diff > pd->keep_alive) {
+          if (diff < 1500000000) {
+            if (!(nc->flags & MG_F_MQTT_PING_PENDING)) {
+              LOG(LL_DEBUG, ("Send PINGREQ"));
+              nc->flags |= MG_F_MQTT_PING_PENDING;
+              mg_mqtt_ping(nc);
+            } else {
+              LOG(LL_DEBUG, ("Ping timeout"));
+              nc->flags |= MG_F_CLOSE_IMMEDIATELY;
+            }
+          } else {
+            /* Wall time has just been set. Avoid immediate ping,
+             * more likely than not it is not needed. The standard allows for
+             * 1.5X interval for ping requests, so even if were just about to
+             * send one, we should be ok waiting 0.4X more. */
+            pd->last_control_time = now - pd->keep_alive * 0.6;
+          }
+        }
       }
       break;
     }
@@ -196,26 +218,44 @@ static void mg_mqtt_proto_data_destructor(void *proto_data) {
   MG_FREE(proto_data);
 }
 
+static struct mg_str mg_mqtt_next_topic_component(struct mg_str *topic) {
+  struct mg_str res = *topic;
+  const char *c = mg_strchr(*topic, '/');
+  if (c != NULL) {
+    res.len = (c - topic->p);
+    topic->len -= (res.len + 1);
+    topic->p += (res.len + 1);
+  } else {
+    topic->len = 0;
+  }
+  return res;
+}
+
+/* Refernce: https://mosquitto.org/man/mqtt-7.html */
 int mg_mqtt_match_topic_expression(struct mg_str exp, struct mg_str topic) {
-  /* TODO(mkm): implement real matching */
-  if (memchr(exp.p, '#', exp.len)) {
-    /* exp `foo/#` will become `foo/` */
-    exp.len -= 1;
-    /*
-     * topic should be longer than the expression: e.g. topic `foo/bar` does
-     * match `foo/#`, but neither `foo` nor `foo/` do.
-     */
-    if (topic.len <= exp.len) {
+  struct mg_str ec, tc;
+  if (exp.len == 0) return 0;
+  while (1) {
+    ec = mg_mqtt_next_topic_component(&exp);
+    tc = mg_mqtt_next_topic_component(&topic);
+    if (ec.len == 0) {
+      if (tc.len != 0) return 0;
+      if (exp.len == 0) break;
+      continue;
+    }
+    if (mg_vcmp(&ec, "+") == 0) {
+      if (tc.len == 0 && topic.len == 0) return 0;
+      continue;
+    }
+    if (mg_vcmp(&ec, "#") == 0) {
+      /* Must be the last component in the expression or it's invalid. */
+      return (exp.len == 0);
+    }
+    if (mg_strcmp(ec, tc) != 0) {
       return 0;
     }
-
-    /* Truncate topic so that it'll pass the next length check */
-    topic.len = exp.len;
   }
-  if (topic.len != exp.len) {
-    return 0;
-  }
-  return strncmp(topic.p, exp.p, exp.len) == 0;
+  return (tc.len == 0 && topic.len == 0);
 }
 
 int mg_mqtt_vmatch_topic_expression(const char *exp, struct mg_str topic) {
